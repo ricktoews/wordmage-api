@@ -94,16 +94,15 @@ class CustomMoods
     }
 
 
-    public function findWordsForMoodText($text, $exclude_word_ids = [], $limit = 13): array
+    public function findWordsForMoodText($exclude_word_ids = [], $limit = 13, $embedding = null): array
     {
         global $wordmageDb;
 
-        $limit = max(1, min((int)$limit, 200));
-        $text = $this->normalizeMoodText($text);
-
-        if ($text === '') {
+        if ($embedding === null) {
             return [];
         }
+
+        $limit = max(1, min((int)$limit, 200));
 
         $excludeIds = [];
         foreach ((array)$exclude_word_ids as $id) {
@@ -114,14 +113,16 @@ class CustomMoods
         }
         $excludeIds = array_values(array_unique($excludeIds));
 
-        $payload = json_encode([
-            "text" => $text,
+        $payloadData = [
+            "embedding" => $embedding,
             "exclude_word_ids" => $excludeIds,
             "limit" => $limit,
             "pool" => 75,
             "hard_cap" => 500,
             "include_scores" => false
-        ]);
+        ];
+
+        $payload = json_encode($payloadData);
 error_log('====> findWordsForMoodText; payload ' . json_encode($payload));
         $ch = curl_init("http://127.0.0.1:8013/search");
         curl_setopt($ch, CURLOPT_POST, true);
@@ -347,6 +348,7 @@ error_log('====> findWordsForMoodText; payload ' . json_encode($payload));
                 'success' => true,
                 'status' => 200,
                 'custom_mood_id' => $customMoodId,
+                'embedding' => $embedding,
                 'embedding_model' => $embeddingModel,
                 'embedding_dim' => $embeddingDim
             ];

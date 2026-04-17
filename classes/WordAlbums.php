@@ -207,6 +207,7 @@ class WordAlbums
                 SELECT
                     wa.id,
                     wa.title,
+                    wa.custom_mood_id,
                     cm.mood_text,
                     wa.created_at,
                     wa.updated_at,
@@ -216,7 +217,7 @@ class WordAlbums
                 LEFT JOIN word_album_items wai ON wai.album_id = wa.id
                 WHERE wa.user_id = :user_id
                   AND wa.id = :album_id
-                GROUP BY wa.id, wa.title, cm.mood_text, wa.created_at, wa.updated_at
+                                GROUP BY wa.id, wa.title, wa.custom_mood_id, cm.mood_text, wa.created_at, wa.updated_at
                 LIMIT 1
             ";
 
@@ -274,6 +275,7 @@ class WordAlbums
                 'data' => [
                     'id' => (int)$album['id'],
                     'title' => $album['title'],
+                    'custom_mood_id' => isset($album['custom_mood_id']) ? (int)$album['custom_mood_id'] : null,
                     'mood_text' => $album['mood_text'],
                     'created_at' => $album['created_at'],
                     'updated_at' => $album['updated_at'],
@@ -601,10 +603,12 @@ class WordAlbums
                     $targetCount = count($normalizedWords);
                     $remainingSlots = max(100, $targetCount - count($lockedWords));
 
+                    $embedding = isset($embedResult['embedding']) ? $embedResult['embedding'] : null;
+
                     $freshWords = $customMoods->findWordsForMoodText(
-                        $moodChange['mood_text'],
                         $lockedIds,
-                        $remainingSlots
+                        $remainingSlots,
+                        $embedding
                     );
 
                     $finalWords = [];

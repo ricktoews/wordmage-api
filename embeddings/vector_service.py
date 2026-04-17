@@ -23,7 +23,8 @@ app = FastAPI()
 
 
 class SearchReq(BaseModel):
-    text: str
+    text: str = ""
+    embedding: list[float] = None
     exclude_word_ids: list[int] = []
     limit: int = 13
     pool: int = 75
@@ -39,8 +40,10 @@ def health():
 @app.post("/search")
 def search(req: SearchReq):
     text = (req.text or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="text is required")
+    embedding = req.embedding
+    
+    if not text and not embedding:
+        raise HTTPException(status_code=400, detail="text or embedding is required")
 
     limit = max(1, min(int(req.limit), 200))
     hard_cap = max(limit, min(int(req.hard_cap), int(WORD_VECS.shape[0])))
@@ -48,13 +51,21 @@ def search(req: SearchReq):
 
     t0 = time.time()
 
-    # Embed query text
-    resp = client.embeddings.create(model=MODEL, input=text)
-    q = np.array(resp.data[0].embedding, dtype=np.float32)
-    qn = np.linalg.norm(q)
-    if qn == 0:
-        raise HTTPException(status_code=500, detail="query embedding norm was zero")
-    q = q / qn  # normalize
+    # Use provided embedding or create one from text
+    if embedding is not None:
+        q = np.array(embedding, dtype=np.float32)
+        qn = np.linalg.norm(q)
+        if qn == 0:
+            raise HTTPException(status_code=500, detail="provided embedding norm was zero")
+        q = q / qn  # normalize
+    else:
+        # Embed query text
+        resp = client.embeddings.create(model=MODEL, input=text)
+        q = np.array(resp.data[0].embedding, dtype=np.float32)
+        qn = np.linalg.norm(q)
+        if qn == 0:
+            raise HTTPException(status_code=500, detail="query embedding norm was zero")
+        q = q / qn  # normalize
 
     # Cosine similarity via dot product (WORD_VECS already normalized)
     scores = WORD_VECS @ q  # shape (N,)
