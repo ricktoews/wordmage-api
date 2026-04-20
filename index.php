@@ -173,16 +173,25 @@ $app->get('/custom-mood/{mood_text}', function ($request, $response, $args) {
 $app->post('/custom-mood', function ($request, $response) {
     $data = $request->getParsedBody();
 
-    $text = isset($data['mood_text']) ? trim($data['mood_text']) : '';
+    $customMoodId = isset($data['custom_mood_id']) ? (int)$data['custom_mood_id'] : 0;
     $limit = isset($data['limit']) ? (int)$data['limit'] : 13;
     $exclude_word_ids = isset($data['exclude_word_ids']) && is_array($data['exclude_word_ids']) ? $data['exclude_word_ids'] : [];
 
-    if ($text === '') {
-        return $response->withStatus(400)
-                        ->withJson(['error' => 'text is required']);
+    $customMoods = new \WordMage\CustomMoods();
+
+    if ($customMoodId > 0) {
+        $text = $customMoods->getMoodTextById($customMoodId, 4);
+        if ($text === null || $text === '') {
+            return $response->withStatus(404)
+                            ->withJson(['error' => 'Custom mood not found']);
+        }
     }
 
-    $customMoods = new \WordMage\CustomMoods();
+    if ($text === '') {
+        return $response->withStatus(400)
+                        ->withJson(['error' => 'mood_text or custom_mood_id is required']);
+    }
+
     $results = $customMoods->getWordsByCustomText($text, $exclude_word_ids, $limit);
 
     return $response->withJson($results);

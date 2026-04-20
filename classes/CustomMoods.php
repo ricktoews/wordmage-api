@@ -3,6 +3,45 @@ namespace WordMage;
 
 class CustomMoods
 {
+    public function getMoodTextById($customMoodId, $userId = 4)
+    {
+        global $wordmageDb;
+
+        $customMoodId = (int)$customMoodId;
+        $userId = (int)$userId;
+
+        if ($customMoodId <= 0) {
+            return null;
+        }
+
+        try {
+            $stmt = $wordmageDb->prepare(
+                "
+                SELECT mood_text
+                FROM custom_moods
+                WHERE id = :id
+                  AND user_id = :user_id
+                LIMIT 1
+                "
+            );
+
+            $stmt->execute([
+                ':id' => $customMoodId,
+                ':user_id' => $userId
+            ]);
+
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+            if (!$row || !isset($row['mood_text'])) {
+                return null;
+            }
+
+            return $this->normalizeMoodText($row['mood_text']);
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
+
+
     public function getWordsByCustomText($text, $exclude_word_ids = [], $limit = 13) {
         global $wordmageDb;
 
@@ -123,7 +162,6 @@ class CustomMoods
         ];
 
         $payload = json_encode($payloadData);
-error_log('====> findWordsForMoodText; payload ' . json_encode($payload));
         $ch = curl_init("http://127.0.0.1:8013/search");
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
