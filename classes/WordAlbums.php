@@ -109,7 +109,7 @@ class WordAlbums
                     $stmtItem->execute([
                         ':album_id' => $albumId,
                         ':word_id' => $wordId,
-                        ':position' => null
+                        ':position' => -1
                     ]);
                 } else {
                     $stmtItem->execute([
