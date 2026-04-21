@@ -190,7 +190,7 @@ $app->post('/custom-mood', function ($request, $response) {
     $finalWords = [];
     $position = 1;
 
-    $freshwords = $customMoods->findWordsForMoodText([], 100, $embedding);
+    $freshWords = $customMoods->findWordsForMoodText([], 100, $embedding);
 
     foreach ($freshWords as $word) {
         $finalWords[] = [
