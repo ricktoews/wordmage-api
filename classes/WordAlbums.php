@@ -273,6 +273,7 @@ class WordAlbums
                 LEFT JOIN word_album_items wai ON wai.album_id = wa.id
                 WHERE wa.user_id = :user_id
                   AND wa.id = :album_id
+                  AND wai.position IS NOT NULL
                                 GROUP BY wa.id, wa.title, wa.custom_mood_id, cm.mood_text, wa.created_at, wa.updated_at
                 LIMIT 1
             ";
@@ -305,6 +306,7 @@ class WordAlbums
                 FROM word_album_items wai
                 INNER JOIN word_pool wp ON wp.id = wai.word_id
                 WHERE wai.album_id = :album_id
+                  AND wai.position IS NOT NULL
                 ORDER BY wai.position ASC
             ";
 
