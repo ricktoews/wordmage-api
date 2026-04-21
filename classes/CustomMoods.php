@@ -41,6 +41,56 @@ class CustomMoods
         }
     }
 
+    public function getEmbeddingByCustomMoodId($customMoodId, $userId = 4)
+    {
+        global $wordmageDb;
+
+        $customMoodId = (int)$customMoodId;
+        $userId = (int)$userId;
+
+        if ($customMoodId <= 0) {
+            return null;
+        }
+
+        try {
+            $stmt = $wordmageDb->prepare(
+                "
+                SELECT embedding, embedding_model, embedding_dim
+                FROM custom_moods
+                WHERE id = :id
+                  AND user_id = :user_id
+                LIMIT 1
+                "
+            );
+
+            $stmt->execute([
+                ':id' => $customMoodId,
+                ':user_id' => $userId
+            ]);
+
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+            if (!$row || !isset($row['embedding']) || $row['embedding'] === null) {
+                return null;
+            }
+
+            $embedding = json_decode((string)$row['embedding'], true);
+            if (!is_array($embedding)) {
+                return null;
+            }
+
+            $embeddingDim = isset($row['embedding_dim']) && $row['embedding_dim'] !== null
+                ? (int)$row['embedding_dim']
+                : count($embedding);
+
+            return [
+                'embedding' => $embedding,
+                'embedding_model' => $row['embedding_model'],
+                'embedding_dim' => $embeddingDim
+            ];
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
 
     public function getWordsByCustomText($text, $exclude_word_ids = [], $limit = 13) {
         global $wordmageDb;

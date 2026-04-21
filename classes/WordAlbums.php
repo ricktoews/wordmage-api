@@ -11,6 +11,7 @@ class WordAlbums
         $userId = (int)$userId;
         $title = trim((string)$title);
         $moodText = $moodText !== null ? trim((string)$moodText) : null;
+        $customMoodId = null;
 
         if ($title === '') {
             return [
@@ -35,15 +36,44 @@ class WordAlbums
         try {
             $wordmageDb->beginTransaction();
 
+            if ($moodText !== null && $moodText !== '') {
+                $normalizedMoodText = preg_replace('/\s+/', ' ', $moodText);
+                $moodHash = hash('sha256', (string)$normalizedMoodText, true);
+
+                $sqlMood = "
+                    INSERT INTO custom_moods (user_id, mood_text, mood_hash, last_used_at, use_count)
+                    VALUES (:user_id, :mood_text, :mood_hash, NOW(), 1)
+                    ON DUPLICATE KEY UPDATE
+                      id = LAST_INSERT_ID(id),
+                      mood_text = VALUES(mood_text),
+                      last_used_at = NOW(),
+                      use_count = use_count + 1
+                ";
+
+                $stmtMood = $wordmageDb->prepare($sqlMood);
+                $stmtMood->execute([
+                    ':user_id' => $userId,
+                    ':mood_text' => $normalizedMoodText,
+                    ':mood_hash' => $moodHash
+                ]);
+
+                $customMoodId = (int)$wordmageDb->lastInsertId();
+                if ($customMoodId <= 0) {
+                    throw new \Exception('Could not resolve custom mood id for album creation.');
+                }
+
+                $moodText = $normalizedMoodText;
+            }
+
             $sqlAlbum = "
-                INSERT INTO word_albums (user_id, title, mood_text, source_type)
-                VALUES (:user_id, :title, :mood_text, :source_type)
+                INSERT INTO word_albums (user_id, title, custom_mood_id, source_type)
+                VALUES (:user_id, :title, :custom_mood_id, :source_type)
             ";
             $stmtAlbum = $wordmageDb->prepare($sqlAlbum);
             $stmtAlbum->execute([
                 ':user_id' => $userId,
                 ':title' => $title,
-                ':mood_text' => $moodText,
+                ':custom_mood_id' => $customMoodId,
                 ':source_type' => 'mood'
             ]);
 

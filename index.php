@@ -181,6 +181,7 @@ $app->post('/custom-mood', function ($request, $response) {
 
     if ($customMoodId > 0) {
         $text = $customMoods->getMoodTextById($customMoodId, 4);
+
         if ($text === null || $text === '') {
             return $response->withStatus(404)
                             ->withJson(['error' => 'Custom mood not found']);
