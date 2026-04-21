@@ -105,11 +105,19 @@ class WordAlbums
 
             $position = 1;
             foreach ($cleanWordIds as $wordId) {
-                $stmtItem->execute([
-                    ':album_id' => $albumId,
-                    ':word_id' => $wordId,
-                    ':position' => $position
-                ]);
+                if ($position > 20) {
+                    $stmtItem->execute([
+                        ':album_id' => $albumId,
+                        ':word_id' => $wordId,
+                        ':position' => null
+                    ]);
+                } else {
+                    $stmtItem->execute([
+                        ':album_id' => $albumId,
+                        ':word_id' => $wordId,
+                        ':position' => $position
+                    ]);
+                }
                 $position++;
             }
 
