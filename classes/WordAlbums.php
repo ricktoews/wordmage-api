@@ -8,10 +8,13 @@ class WordAlbums
     {
         global $wordmageDb;
 
+        $customMoods = new CustomMoods();
+
         $userId = (int)$userId;
         $title = trim((string)$title);
         $moodText = $moodText !== null ? trim((string)$moodText) : null;
         $customMoodId = null;
+        $embedding = null;
 
         if ($title === '') {
             return [
@@ -60,6 +63,21 @@ class WordAlbums
                 $customMoodId = (int)$wordmageDb->lastInsertId();
                 if ($customMoodId <= 0) {
                     throw new \Exception('Could not resolve custom mood id for album creation.');
+                }
+
+                $embedResult = $customMoods->updateCustomMoodWithEmbedding($customMoodId, $normalizedMoodText);
+                if (!(isset($embedResult['success']) && $embedResult['success'])) {
+                    $wordmageDb->rollBack();
+                    return $embedResult;
+                }
+
+                $embedding = isset($embedResult['embedding']) ? $embedResult['embedding'] : null;
+
+                if (count($cleanWordIds) === 0 && $embedding !== null) {
+                    $generatedWords = $customMoods->findWordsForMoodText([], 100, $embedding);
+                    $cleanWordIds = array_values(array_map(function ($word) {
+                        return (int)$word['id'];
+                    }, $generatedWords));
                 }
 
                 $moodText = $normalizedMoodText;
