@@ -180,22 +180,27 @@ $app->post('/custom-mood', function ($request, $response) {
     $customMoods = new \WordMage\CustomMoods();
 
     if ($customMoodId > 0) {
-        $text = $customMoods->getMoodTextById($customMoodId, 4);
-
-        if ($text === null || $text === '') {
+        $embedding = $customMoods->getMoodEmbeddingById($customMoodId, 4);
+        if ($embedding === null) {
             return $response->withStatus(404)
                             ->withJson(['error' => 'Custom mood not found']);
         }
     }
 
-    if ($text === '') {
-        return $response->withStatus(400)
-                        ->withJson(['error' => 'mood_text or custom_mood_id is required']);
+    $finalWords = [];
+    $position = 1;
+
+    $freshwords = $customMoods->findWordsForMoodText([], 100, $embedding);
+
+    foreach ($freshWords as $word) {
+        $finalWords[] = [
+            'id' => (int)$word['id'],
+            'is_locked' => 0,
+            'position' => $position++
+        ];
     }
 
-    $results = $customMoods->getWordsByCustomText($text, $exclude_word_ids, $limit);
-
-    return $response->withJson($results);
+    return $response->withJson($finalWords);
 });
 
 $app->put('/custom-moods/{id}', function ($request, $response, $args) {

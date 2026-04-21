@@ -3,7 +3,7 @@ namespace WordMage;
 
 class CustomMoods
 {
-    public function getMoodTextById($customMoodId, $userId = 4)
+    public function getMoodEmbeddingById($customMoodId, $userId = 4)
     {
         global $wordmageDb;
 
@@ -17,7 +17,7 @@ class CustomMoods
         try {
             $stmt = $wordmageDb->prepare(
                 "
-                SELECT mood_text
+                SELECT embedding
                 FROM custom_moods
                 WHERE id = :id
                   AND user_id = :user_id
@@ -31,11 +31,11 @@ class CustomMoods
             ]);
 
             $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-            if (!$row || !isset($row['mood_text'])) {
+            if (!$row || !isset($row['embedding'])) {
                 return null;
             }
 
-            return $this->normalizeMoodText($row['mood_text']);
+            return $this->normalizeMoodText($row['embedding']);
         } catch (\Exception $e) {
             return null;
         }
