@@ -322,6 +322,21 @@ $app->put('/albums/{id}', function ($request, $response, $args) {
     return $response->withJson($result['data']);
 });
 
+$app->post('/albums/{id}/refresh', function ($request, $response, $args) {
+    $albumId = isset($args['id']) ? (int)$args['id'] : 0;
+
+    $albums = new \WordMage\WordAlbums();
+    $result = $albums->refreshAlbum($albumId);
+
+    if (!$result['success']) {
+        return $response->withStatus($result['status'])->withJson([
+            'error' => $result['error']
+        ]);
+    }
+
+    return $response->withJson($result['data']);
+});
+
 
 $app->post('/albums/add-word', function ($request, $response) {
     $data = json_decode($request->getBody()->getContents(), true);

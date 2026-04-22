@@ -1446,6 +1446,125 @@ public function removeWordFromAlbum($albumId, $wordId)
 }
 
 
+public function refreshAlbum($albumId)
+{
+    global $wordmageDb;
+
+    $albumId = (int)$albumId;
+    if ($albumId <= 0) {
+        return [
+            'success' => false,
+            'status' => 400,
+            'error' => 'Invalid album id'
+        ];
+    }
+
+    try {
+        $wordmageDb->beginTransaction();
+
+        // 1) Load both locked words and NULL-position candidate pool in one query.
+        $seedSql = "
+            SELECT word_id, is_locked, position
+            FROM word_album_items
+            WHERE album_id = :album_id
+              AND (is_locked = 1 OR position IS NULL)
+            ORDER BY is_locked DESC, position ASC, word_id ASC
+        ";
+        $seedStmt = $wordmageDb->prepare($seedSql);
+        $seedStmt->execute([':album_id' => $albumId]);
+        $seedRows = $seedStmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        // Build a map of reserved positions in the 1..20 window.
+        $lockedByPosition = [];
+        $candidateWordIds = [];
+
+        foreach ($seedRows as $row) {
+            $isLocked = (int)$row['is_locked'] === 1;
+            $position = isset($row['position']) ? (int)$row['position'] : 0;
+
+            if ($isLocked) {
+                $lockedByPosition[$position] = (int)$row['word_id'];
+            } elseif ($row['position'] === null) {
+                $candidateWordIds[] = (int)$row['word_id'];
+            }
+        }
+
+        $targetPositions = range(1, 20);
+        $reservedPositions = array_keys($lockedByPosition);
+        sort($reservedPositions);
+
+        $availablePositions = array_values(array_diff($targetPositions, $reservedPositions));
+        $targetFreshCount = count($availablePositions);
+
+        // 2) Shuffle candidate pool and take what we need for available positions.
+        $freshWordIds = [];
+        if ($targetFreshCount > 0 && !empty($candidateWordIds)) {
+            shuffle($candidateWordIds);
+            $freshWordIds = array_slice($candidateWordIds, 0, $targetFreshCount);
+        }
+
+        // 3) Reset all unlocked words to NULL positions.
+        $resetSql = "
+            UPDATE word_album_items
+            SET position = NULL
+            WHERE album_id = :album_id
+              AND (is_locked IS NULL OR is_locked <> 1)
+        ";
+        $resetStmt = $wordmageDb->prepare($resetSql);
+        $resetStmt->execute([':album_id' => $albumId]);
+
+        // 4) Assign selected fresh words into available slots (1..20 excluding locked positions).
+        if (!empty($availablePositions) && !empty($freshWordIds)) {
+            $updateSql = "
+                UPDATE word_album_items
+                SET position = :position
+                WHERE album_id = :album_id
+                  AND word_id = :word_id
+                  AND (is_locked IS NULL OR is_locked <> 1)
+                LIMIT 1
+            ";
+            $updateStmt = $wordmageDb->prepare($updateSql);
+
+            $assignCount = min(count($availablePositions), count($freshWordIds));
+            for ($i = 0; $i < $assignCount; $i++) {
+                $updateStmt->execute([
+                    ':position' => $availablePositions[$i],
+                    ':album_id' => $albumId,
+                    ':word_id' => $freshWordIds[$i]
+                ]);
+            }
+        }
+
+        $wordmageDb->commit();
+
+        $lockedCount = count($lockedByPosition);
+        $freshCount = min(count($availablePositions), count($freshWordIds));
+
+        return [
+            'success' => true,
+            'status' => 200,
+            'data' => [
+                'album_id' => $albumId,
+                'locked_count' => $lockedCount,
+                'fresh_count' => $freshCount,
+                'positioned_total' => $lockedCount + $freshCount,
+                'fresh_word_ids' => $freshWordIds
+            ]
+        ];
+    } catch (\Exception $e) {
+        if ($wordmageDb->inTransaction()) {
+            $wordmageDb->rollBack();
+        }
+
+        return [
+            'success' => false,
+            'status' => 500,
+            'error' => 'Failed to refresh album: ' . $e->getMessage()
+        ];
+    }
+}
+
+
     public function setAlbumWordLockStatus($userId, $albumId, $wordId, $isLocked)
     {
         global $wordmageDb;
