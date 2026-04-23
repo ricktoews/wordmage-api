@@ -858,6 +858,203 @@ class WordAlbums
         }
     }
 
+    public function updateAlbumMoodText($userId, $albumId, $moodText)
+    {
+        global $wordmageDb;
+
+        $customMoods = new CustomMoods();
+
+        $userId = (int)$userId;
+        $albumId = (int)$albumId;
+        $moodText = trim((string)$moodText);
+
+        if ($albumId <= 0) {
+            return [
+                'success' => false,
+                'status' => 400,
+                'error' => 'Invalid album id'
+            ];
+        }
+
+        if ($moodText === '') {
+            return [
+                'success' => false,
+                'status' => 400,
+                'error' => 'mood_text is required'
+            ];
+        }
+
+        try {
+            $wordmageDb->beginTransaction();
+
+            $albumSql = "
+                SELECT id, custom_mood_id
+                FROM word_albums
+                WHERE id = :album_id
+                  AND user_id = :user_id
+                LIMIT 1
+            ";
+            $albumStmt = $wordmageDb->prepare($albumSql);
+            $albumStmt->execute([
+                ':album_id' => $albumId,
+                ':user_id' => $userId
+            ]);
+
+            $album = $albumStmt->fetch(\PDO::FETCH_ASSOC);
+            if (!$album) {
+                $wordmageDb->rollBack();
+                return [
+                    'success' => false,
+                    'status' => 404,
+                    'error' => 'Album not found'
+                ];
+            }
+
+            $customMoodId = isset($album['custom_mood_id']) ? (int)$album['custom_mood_id'] : 0;
+            $normalizedMoodText = preg_replace('/\s+/', ' ', $moodText);
+
+            if ($customMoodId <= 0) {
+                $moodHash = hash('sha256', (string)$normalizedMoodText, true);
+
+                $insertMoodSql = "
+                    INSERT INTO custom_moods (user_id, mood_text, mood_hash, last_used_at, use_count)
+                    VALUES (:user_id, :mood_text, :mood_hash, NOW(), 1)
+                    ON DUPLICATE KEY UPDATE
+                      id = LAST_INSERT_ID(id),
+                      mood_text = VALUES(mood_text),
+                      last_used_at = NOW(),
+                      use_count = use_count + 1
+                ";
+
+                $insertMoodStmt = $wordmageDb->prepare($insertMoodSql);
+                $insertMoodStmt->execute([
+                    ':user_id' => $userId,
+                    ':mood_text' => $normalizedMoodText,
+                    ':mood_hash' => $moodHash
+                ]);
+
+                $customMoodId = (int)$wordmageDb->lastInsertId();
+                if ($customMoodId <= 0) {
+                    $wordmageDb->rollBack();
+                    return [
+                        'success' => false,
+                        'status' => 500,
+                        'error' => 'Could not resolve custom mood id for album.'
+                    ];
+                }
+
+                $attachSql = "
+                    UPDATE word_albums
+                    SET custom_mood_id = :custom_mood_id,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = :album_id
+                      AND user_id = :user_id
+                    LIMIT 1
+                ";
+                $attachStmt = $wordmageDb->prepare($attachSql);
+                $attachStmt->execute([
+                    ':custom_mood_id' => $customMoodId,
+                    ':album_id' => $albumId,
+                    ':user_id' => $userId
+                ]);
+
+                $embedResult = $customMoods->updateCustomMoodWithEmbedding($customMoodId, $normalizedMoodText);
+                if (!(isset($embedResult['success']) && $embedResult['success'])) {
+                    $wordmageDb->rollBack();
+                    return $embedResult;
+                }
+
+                $wordmageDb->commit();
+
+                return [
+                    'success' => true,
+                    'status' => 200,
+                    'data' => [
+                        'album_id' => $albumId,
+                        'custom_mood_id' => $customMoodId,
+                        'mood_text' => $normalizedMoodText,
+                        'embedding' => $embedResult['embedding'],
+                        'embedding_model' => $embedResult['embedding_model'],
+                        'embedding_dim' => $embedResult['embedding_dim'],
+                        'changed' => true
+                    ]
+                ];
+            }
+
+            $moodChange = $customMoods->didMoodChange($customMoodId, $normalizedMoodText);
+            if (!(isset($moodChange['success']) && $moodChange['success'])) {
+                $wordmageDb->rollBack();
+                return $moodChange;
+            }
+
+            $embedResult = null;
+            $changed = !empty($moodChange['changed']);
+
+            if ($changed) {
+                $embedResult = $customMoods->updateCustomMoodWithEmbedding($customMoodId, $moodChange['mood_text']);
+                if (!(isset($embedResult['success']) && $embedResult['success'])) {
+                    $wordmageDb->rollBack();
+                    return $embedResult;
+                }
+            } else {
+                $existing = $customMoods->getEmbeddingByCustomMoodId($customMoodId, $userId);
+                if ($existing !== null) {
+                    $embedResult = [
+                        'embedding' => $existing['embedding'],
+                        'embedding_model' => $existing['embedding_model'],
+                        'embedding_dim' => $existing['embedding_dim']
+                    ];
+                } else {
+                    // If mood text is unchanged but embedding is missing, backfill it.
+                    $embedResult = $customMoods->updateCustomMoodWithEmbedding($customMoodId, $moodChange['mood_text']);
+                    if (!(isset($embedResult['success']) && $embedResult['success'])) {
+                        $wordmageDb->rollBack();
+                        return $embedResult;
+                    }
+                }
+            }
+
+            $touchAlbumSql = "
+                UPDATE word_albums
+                SET updated_at = CURRENT_TIMESTAMP
+                WHERE id = :album_id
+                  AND user_id = :user_id
+                LIMIT 1
+            ";
+            $touchAlbumStmt = $wordmageDb->prepare($touchAlbumSql);
+            $touchAlbumStmt->execute([
+                ':album_id' => $albumId,
+                ':user_id' => $userId
+            ]);
+
+            $wordmageDb->commit();
+
+            return [
+                'success' => true,
+                'status' => 200,
+                'data' => [
+                    'album_id' => $albumId,
+                    'custom_mood_id' => $customMoodId,
+                    'mood_text' => $moodChange['mood_text'],
+                    'embedding' => $embedResult['embedding'],
+                    'embedding_model' => $embedResult['embedding_model'],
+                    'embedding_dim' => $embedResult['embedding_dim'],
+                    'changed' => $changed
+                ]
+            ];
+        } catch (\Exception $e) {
+            if ($wordmageDb->inTransaction()) {
+                $wordmageDb->rollBack();
+            }
+
+            return [
+                'success' => false,
+                'status' => 500,
+                'error' => 'Could not update album mood: ' . $e->getMessage()
+            ];
+        }
+    }
+
 public function deleteAlbum($userId, $albumId)
 {
     global $wordmageDb;

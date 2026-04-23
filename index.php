@@ -322,6 +322,25 @@ $app->put('/albums/{id}', function ($request, $response, $args) {
     return $response->withJson($result['data']);
 });
 
+$app->patch('/albums/{id}/mood-text', function ($request, $response, $args) {
+    $data = json_decode($request->getBody()->getContents(), true);
+
+    $userId = 4; // replace later with actual logged-in user id
+    $albumId = isset($args['id']) ? (int)$args['id'] : 0;
+    $moodText = isset($data['mood_text']) ? trim((string)$data['mood_text']) : '';
+
+    $albums = new \WordMage\WordAlbums();
+    $result = $albums->updateAlbumMoodText($userId, $albumId, $moodText);
+
+    if (!$result['success']) {
+        return $response->withStatus($result['status'])->withJson([
+            'error' => $result['error']
+        ]);
+    }
+
+    return $response->withJson($result['data']);
+});
+
 $app->post('/albums/{id}/refresh', function ($request, $response, $args) {
     $albumId = isset($args['id']) ? (int)$args['id'] : 0;
 
