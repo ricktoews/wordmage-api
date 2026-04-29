@@ -584,6 +584,8 @@ class WordAlbums
             return $a['position'] <=> $b['position'];
         });
 
+        $normalizedWords = $this->applyTwentySlotLayout($normalizedWords);
+
         try {
             $wordmageDb->beginTransaction();
 
@@ -670,13 +672,12 @@ class WordAlbums
                     );
 
                     $finalWords = [];
-                    $position = 1;
 
                     foreach ($lockedWords as $word) {
                         $finalWords[] = [
                             'id' => (int)$word['id'],
                             'is_locked' => 1,
-                            'position' => $position++
+                            'position' => null
                         ];
                     }
 
@@ -684,36 +685,15 @@ class WordAlbums
                         $finalWords[] = [
                             'id' => (int)$word['id'],
                             'is_locked' => 0,
-                            'position' => $position++
+                            'position' => null
                         ];
                     }
+
+                    $finalWords = $this->applyTwentySlotLayout($finalWords);
                 }
             }
 
-            // Replace album items completely
-            $deleteSql = "
-                DELETE FROM word_album_items
-                WHERE album_id = :album_id
-            ";
-            $deleteStmt = $wordmageDb->prepare($deleteSql);
-            $deleteStmt->bindValue(':album_id', $albumId, \PDO::PARAM_INT);
-            $deleteStmt->execute();
-
-            if (!empty($finalWords)) {
-                $insertSql = "
-                    INSERT INTO word_album_items (album_id, word_id, position, is_locked)
-                    VALUES (:album_id, :word_id, :position, :is_locked)
-                ";
-                $insertStmt = $wordmageDb->prepare($insertSql);
-
-                foreach ($finalWords as $word) {
-                    $insertStmt->bindValue(':album_id', $albumId, \PDO::PARAM_INT);
-                    $insertStmt->bindValue(':word_id', $word['id'], \PDO::PARAM_INT);
-                    $insertStmt->bindValue(':position', $word['position'], \PDO::PARAM_INT);
-                    $insertStmt->bindValue(':is_locked', $word['is_locked'], \PDO::PARAM_INT);
-                    $insertStmt->execute();
-                }
-            }
+            $this->replaceAlbumItems($albumId, $finalWords);
 
             $wordmageDb->commit();
 
@@ -1014,6 +994,66 @@ class WordAlbums
                 }
             }
 
+            if ($changed) {
+                $existingWordsSql = "
+                    SELECT word_id, is_locked, position
+                    FROM word_album_items
+                    WHERE album_id = :album_id
+                    ORDER BY
+                        CASE WHEN position IS NULL THEN 1 ELSE 0 END ASC,
+                        position ASC,
+                        word_id ASC
+                ";
+                $existingWordsStmt = $wordmageDb->prepare($existingWordsSql);
+                $existingWordsStmt->execute([':album_id' => $albumId]);
+                $existingWords = $existingWordsStmt->fetchAll(\PDO::FETCH_ASSOC);
+
+                $lockedWords = [];
+                foreach ($existingWords as $word) {
+                    if ((int)$word['is_locked'] === 1) {
+                        $lockedWords[] = [
+                            'id' => (int)$word['word_id'],
+                            'is_locked' => 1,
+                            'position' => isset($word['position']) ? (int)$word['position'] : null
+                        ];
+                    }
+                }
+
+                $lockedIds = array_values(array_map(function ($word) {
+                    return (int)$word['id'];
+                }, $lockedWords));
+
+                $targetCount = count($existingWords);
+                $remainingSlots = max(100, $targetCount - count($lockedWords));
+                $embedding = isset($embedResult['embedding']) ? $embedResult['embedding'] : null;
+
+                $freshWords = $customMoods->findWordsForMoodText(
+                    $lockedIds,
+                    $remainingSlots,
+                    $embedding
+                );
+
+                $finalWords = [];
+
+                foreach ($lockedWords as $word) {
+                    $finalWords[] = [
+                        'id' => (int)$word['id'],
+                        'is_locked' => 1,
+                        'position' => null
+                    ];
+                }
+
+                foreach ($freshWords as $word) {
+                    $finalWords[] = [
+                        'id' => (int)$word['id'],
+                        'is_locked' => 0,
+                        'position' => null
+                    ];
+                }
+
+                $this->replaceAlbumItems($albumId, $this->applyTwentySlotLayout($finalWords));
+            }
+
             $touchAlbumSql = "
                 UPDATE word_albums
                 SET updated_at = CURRENT_TIMESTAMP
@@ -1052,6 +1092,52 @@ class WordAlbums
                 'status' => 500,
                 'error' => 'Could not update album mood: ' . $e->getMessage()
             ];
+        }
+    }
+
+    private function applyTwentySlotLayout($words)
+    {
+        $position = 1;
+
+        foreach ($words as $index => $word) {
+            $words[$index]['position'] = $position <= 20 ? $position : null;
+            $position++;
+        }
+
+        return $words;
+    }
+
+    private function replaceAlbumItems($albumId, $words)
+    {
+        global $wordmageDb;
+
+        $deleteSql = "
+            DELETE FROM word_album_items
+            WHERE album_id = :album_id
+        ";
+        $deleteStmt = $wordmageDb->prepare($deleteSql);
+        $deleteStmt->bindValue(':album_id', $albumId, \PDO::PARAM_INT);
+        $deleteStmt->execute();
+
+        if (empty($words)) {
+            return;
+        }
+
+        $insertSql = "
+            INSERT INTO word_album_items (album_id, word_id, position, is_locked)
+            VALUES (:album_id, :word_id, :position, :is_locked)
+        ";
+        $insertStmt = $wordmageDb->prepare($insertSql);
+
+        foreach ($words as $word) {
+            $insertStmt->execute([
+                ':album_id' => (int)$albumId,
+                ':word_id' => (int)$word['id'],
+                ':position' => isset($word['position']) && is_numeric($word['position'])
+                    ? (int)$word['position']
+                    : null,
+                ':is_locked' => !empty($word['is_locked']) ? 1 : 0
+            ]);
         }
     }
 
