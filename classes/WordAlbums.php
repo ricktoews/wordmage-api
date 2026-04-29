@@ -97,29 +97,15 @@ class WordAlbums
 
             $albumId = (int)$wordmageDb->lastInsertId();
 
-            $sqlItem = "
-                INSERT INTO word_album_items (album_id, word_id, position)
-                VALUES (:album_id, :word_id, :position)
-            ";
-            $stmtItem = $wordmageDb->prepare($sqlItem);
+            $albumWords = array_map(function ($wordId) {
+                return [
+                    'id' => (int)$wordId,
+                    'is_locked' => 0,
+                    'position' => null
+                ];
+            }, $cleanWordIds);
 
-            $position = 1;
-            foreach ($cleanWordIds as $wordId) {
-                if ($position > 20) {
-                    $stmtItem->execute([
-                        ':album_id' => $albumId,
-                        ':word_id' => $wordId,
-                        ':position' => -1
-                    ]);
-                } else {
-                    $stmtItem->execute([
-                        ':album_id' => $albumId,
-                        ':word_id' => $wordId,
-                        ':position' => $position
-                    ]);
-                }
-                $position++;
-            }
+            $this->replaceAlbumItems($albumId, $this->applyTwentySlotLayout($albumWords));
 
             $wordmageDb->commit();
 
