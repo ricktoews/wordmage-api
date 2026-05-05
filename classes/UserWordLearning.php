@@ -70,7 +70,7 @@ class UserWordLearning
         $wordId = isset($data['word_id']) ? (int)$data['word_id'] : 0;
         $result = isset($data['result']) ? $data['result'] : '';
 
-        if (!$wordId || !in_array($result, ['correct', 'failed', 'revealed', 'skipped'])) {
+        if (!$wordId || !in_array($result, ['correct', 'hint', 'failed', 'revealed', 'skipped'])) {
             return $response->withJson([
                 "success" => false,
                 "error" => "Invalid word_id or result."
