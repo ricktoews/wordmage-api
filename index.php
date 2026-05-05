@@ -503,6 +503,9 @@ $app->delete('/albums/{id}', function ($request, $response, $args) {
     return $response->withJson($result['data']);
 });
 
+$app->get('/albums/{album_id}/unscramble-queue', UserWordLearning::class . ':getUnscrambleQueue');
+
+$app->post('/user-word-learning/attempt', UserWordLearning::class . ':recordUnscrambleAttempt');
 
 $app->run();
 
