@@ -45,13 +45,13 @@ class UserWordLearning
 
         $stmt = $wordmageDb->prepare($sql);
 
-	$stmt->bindValue(1, $userId, \PDO::PARAM_INT);
-	$stmt->bindValue(2, $albumId, \PDO::PARAM_INT);
-	$stmt->bindValue(3, $limit, \PDO::PARAM_INT);
+    	$stmt->bindValue(1, $userId, \PDO::PARAM_INT);
+    	$stmt->bindValue(2, $albumId, \PDO::PARAM_INT);
+    	$stmt->bindValue(3, $limit, \PDO::PARAM_INT);
 
-	$stmt->execute();
+    	$stmt->execute();
 
- 	$words = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    	$words = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
         return $response->withJson([
             "success" => true,
@@ -158,8 +158,10 @@ class UserWordLearning
         ";
 
         $stmt = $wordmageDb->prepare($sql);
-        $stmt->bind_param("ii", $userId, $wordId);
-        $stmt->execute();
+        $stmt->bindValue(1, $userId, \PDO::PARAM_INT);
+        $stmt->bindValue(2, $wordId, \PDO::PARAM_INT);
+
+    	$stmt->execute();
 
         $result = $stmt->get_result();
 
