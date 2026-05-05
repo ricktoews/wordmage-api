@@ -118,16 +118,15 @@ class UserWordLearning
         ";
 
         $stmt = $wordmageDb->prepare($sql);
-        $stmt->bind_param(
-            "iiiiiis",
-            $userId,
-            $wordId,
-            $timesSeen,
-            $timesCorrect,
-            $timesFailed,
-            $streak,
-            $nextReviewAt
-        );
+
+        $stmt->bindValue(1, $userId, \PDO::PARAM_INT);
+        $stmt->bindValue(2, $wordId, \PDO::PARAM_INT);
+        $stmt->bindValue(3, $timesSeen, \PDO::PARAM_INT);
+        $stmt->bindValue(4, $timesCorrect, \PDO::PARAM_INT);
+        $stmt->bindValue(5, $timesFailed, \PDO::PARAM_INT);
+        $stmt->bindValue(6, $streak, \PDO::PARAM_INT);
+        $stmt->bindValue(7, $nextReviewAt, \PDO::PARAM_STR);
+
         $stmt->execute();
 
         return $response->withJson([
