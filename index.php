@@ -503,9 +503,9 @@ $app->delete('/albums/{id}', function ($request, $response, $args) {
     return $response->withJson($result['data']);
 });
 
-$app->get('/albums/{album_id}/unscramble-queue', UserWordLearning::class . ':getUnscrambleQueue');
+$app->get('/albums/{album_id}/unscramble-queue', \WordMage\UserWordLearning::class . ':getUnscrambleQueue');
 
-$app->post('/user-word-learning/unscramble-attempt', UserWordLearning::class . ':recordUnscrambleAttempt');
+$app->post('/user-word-learning/unscramble-attempt', \WordMage\UserWordLearning::class . ':recordUnscrambleAttempt');
 
 $app->run();
 
