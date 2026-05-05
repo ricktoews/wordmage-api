@@ -163,9 +163,9 @@ class UserWordLearning
 
     	$stmt->execute();
 
-        $result = $stmt->get_result();
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
 
-        return $result->fetch_assoc() ?: null;
+        return $row ?: null;
     }
 
     private static function calculateNextReviewAt($result, $streak)
