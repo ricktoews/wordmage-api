@@ -17,7 +17,6 @@ class UserWordLearning
                 w.id,
                 w.word,
                 w.definition,
-                w.part_of_speech,
                 w.source,
 
                 uwl.times_seen,
@@ -45,15 +44,14 @@ class UserWordLearning
         ";
 
         $stmt = $wordmageDb->prepare($sql);
-        $stmt->bind_param("iii", $userId, $albumId, $limit);
-        $stmt->execute();
 
-        $result = $stmt->get_result();
-        $words = [];
+	$stmt->bindValue(1, $userId, \PDO::PARAM_INT);
+	$stmt->bindValue(2, $albumId, \PDO::PARAM_INT);
+	$stmt->bindValue(3, $limit, \PDO::PARAM_INT);
 
-        while ($row = $result->fetch_assoc()) {
-            $words[] = $row;
-        }
+	$stmt->execute();
+
+ 	$words = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
         return $response->withJson([
             "success" => true,
