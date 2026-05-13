@@ -164,12 +164,15 @@ $app->get('/moods', function ($request, $response) {
     return $response->withJson($words->getMoods());
 });
 
+/*
 $app->get('/custom-mood/{mood_text}', function ($request, $response, $args) {
     $customMoods = new \WordMage\CustomMoods();
     $results = $customMoods->getWordsByCustomText($args['mood_text'], 13);
     return $response->withJson($results);
 });
+*/
 
+/*
 $app->post('/custom-mood', function ($request, $response) {
     $data = $request->getParsedBody();
 
@@ -202,7 +205,9 @@ $app->post('/custom-mood', function ($request, $response) {
 
     return $response->withJson($finalWords);
 });
+*/
 
+/*
 $app->put('/custom-moods/{id}', function ($request, $response, $args) {
     $data = json_decode($request->getBody()->getContents(), true);
 
@@ -221,7 +226,9 @@ $app->put('/custom-moods/{id}', function ($request, $response, $args) {
 
     return $response->withJson($result['data']);
 });
+*/
 
+/*
 $app->delete('/custom-moods/{id}', function ($request, $response, $args) {
     $userId = 4; // replace later with actual logged-in user id
     $moodId = isset($args['id']) ? (int)$args['id'] : 0;
@@ -237,6 +244,7 @@ $app->delete('/custom-moods/{id}', function ($request, $response, $args) {
 
     return $response->withJson($result['data']);
 });
+ */
 
 $app->get('/albums', function ($request, $response) {
     $userId = 4; // replace later with actual logged-in user id
@@ -659,21 +667,23 @@ function register(Request $request, Response $response) {
 }
 
 function loadCustom(Request $request, Response $response) {
-	$body = $request->getBody();
-	$data = json_decode($body, true);
-	$user_id = $data['user_id'];
-	$register = new Register();
-	$custom_data = $register->loadCustom($user_id);
+        $body = $request->getBody();
+        $data = json_decode($body, true);
+        $user_id = $data['user_id'];
+//      Remove unneeded data from initial load.
+//        $register = new Register();
+//        $custom_data = $register->loadCustom($user_id);
         $wordAlbums = new \WordMage\WordAlbums();
-        $liked = $wordAlbums->getFavoritesByUser($user_id);
-        $learn = $wordAlbums->getLearnByUser($user_id);
-	$permanentAlbumIds = $wordAlbums->getPermanentAlbumsByUser($user_id);
-	$custom_data['liked'] = $liked['data'];
-	$custom_data['learn'] = $learn['data'];
-	$custom_data['album_ids'] = $permanentAlbumIds;
+//        $liked = $wordAlbums->getFavoritesByUser($user_id);
+//        $learn = $wordAlbums->getLearnByUser($user_id);
+        $permanentAlbumIds = $wordAlbums->getPermanentAlbumsByUser($user_id);
+//        $custom_data['liked'] = $liked['data'];
+//        $custom_data['learn'] = $learn['data'];
+	$custom_data = array();
+        $custom_data['album_ids'] = $permanentAlbumIds;
 //	unset($custom_data['custom']);
-	$payload = $custom_data;
-	echo json_encode($payload);
+        $payload = $custom_data;
+        echo json_encode($payload);
 }
 
 function saveCustom(Request $request, Response $response) {
