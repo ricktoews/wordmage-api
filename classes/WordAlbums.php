@@ -1572,9 +1572,15 @@ public function addWordToAlbumFront($albumId, $wordId)
         $existing = $stmt->fetch(\PDO::FETCH_ASSOC);
 
         if ($existing) {
-            $oldPosition = (int)$existing['position'];
+            $oldPosition = $existing['position'] !== null ? (int)$existing['position'] : null;
 
-            if ($oldPosition > 1) {
+            if ($oldPosition === 1) {
+                $wordmageDb->commit();
+                return ['message' => 'Word is already at the front of the album'];
+            }
+
+            if ($oldPosition !== null) {
+                // Word has a position: only shift rows before it
                 $sql = "
                     UPDATE word_album_items
                     SET position = position + 1
@@ -1587,27 +1593,34 @@ public function addWordToAlbumFront($albumId, $wordId)
                     ':album_id' => $albumId,
                     ':old_position' => $oldPosition
                 ]);
-
+            } else {
+                // Word has no position: shift all positioned rows to make room
                 $sql = "
                     UPDATE word_album_items
-                    SET position = 1
+                    SET position = position + 1
                     WHERE album_id = :album_id
-                      AND word_id = :word_id
+                      AND position IS NOT NULL
+                    ORDER BY position DESC
                 ";
                 $stmt = $wordmageDb->prepare($sql);
-                $stmt->execute([
-                    ':album_id' => $albumId,
-                    ':word_id' => $wordId
-                ]);
+                $stmt->execute([':album_id' => $albumId]);
             }
+
+            $sql = "
+                UPDATE word_album_items
+                SET position = 1
+                WHERE album_id = :album_id
+                  AND word_id = :word_id
+            ";
+            $stmt = $wordmageDb->prepare($sql);
+            $stmt->execute([
+                ':album_id' => $albumId,
+                ':word_id' => $wordId
+            ]);
 
             $wordmageDb->commit();
 
-            return [
-                'message' => $oldPosition === 1
-                    ? 'Word is already at the front of the album'
-                    : 'Word moved to front'
-            ];
+            return ['message' => 'Word moved to front'];
         }
 
         $sql = "
