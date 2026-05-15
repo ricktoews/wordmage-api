@@ -707,6 +707,203 @@ class WordAlbums
     }
 
 
+    public function updateAlbumWords($userId, $albumId, $words)
+    {
+        global $wordmageDb;
+
+        $userId = (int)$userId;
+        $albumId = (int)$albumId;
+
+        if ($albumId <= 0) {
+            return [
+                'success' => false,
+                'status' => 400,
+                'error' => 'Invalid album id'
+            ];
+        }
+
+        if (!is_array($words)) {
+            return [
+                'success' => false,
+                'status' => 400,
+                'error' => 'Request body must be an array of { word_id, position }.'
+            ];
+        }
+
+        $normalized = [];
+        $seenWordIds = [];
+        $seenPositions = [];
+
+        foreach ($words as $item) {
+            if (!is_array($item) || !isset($item['word_id']) || !isset($item['position'])) {
+                return [
+                    'success' => false,
+                    'status' => 400,
+                    'error' => 'Each item must include word_id and position.'
+                ];
+            }
+
+            $wordId = (int)$item['word_id'];
+            $position = (int)$item['position'];
+
+            if ($wordId <= 0 || $position <= 0) {
+                return [
+                    'success' => false,
+                    'status' => 400,
+                    'error' => 'word_id and position must be positive integers.'
+                ];
+            }
+
+            if (isset($seenWordIds[$wordId])) {
+                return [
+                    'success' => false,
+                    'status' => 400,
+                    'error' => 'Duplicate word_id values are not allowed.'
+                ];
+            }
+
+            if (isset($seenPositions[$position])) {
+                return [
+                    'success' => false,
+                    'status' => 400,
+                    'error' => 'Duplicate position values are not allowed.'
+                ];
+            }
+
+            $seenWordIds[$wordId] = true;
+            $seenPositions[$position] = true;
+            $normalized[] = [
+                'word_id' => $wordId,
+                'position' => $position
+            ];
+        }
+
+        try {
+            $wordmageDb->beginTransaction();
+
+            $albumCheckSql = "
+                SELECT id
+                FROM word_albums
+                WHERE id = :album_id
+                  AND user_id = :user_id
+                LIMIT 1
+            ";
+            $albumCheckStmt = $wordmageDb->prepare($albumCheckSql);
+            $albumCheckStmt->execute([
+                ':album_id' => $albumId,
+                ':user_id' => $userId
+            ]);
+
+            if (!$albumCheckStmt->fetch(\PDO::FETCH_ASSOC)) {
+                $wordmageDb->rollBack();
+                return [
+                    'success' => false,
+                    'status' => 404,
+                    'error' => 'Album not found'
+                ];
+            }
+
+            if (!empty($normalized)) {
+                $wordIds = array_values(array_map(function ($row) {
+                    return (int)$row['word_id'];
+                }, $normalized));
+
+                $placeholders = implode(',', array_fill(0, count($wordIds), '?'));
+                $verifySql = "
+                    SELECT DISTINCT word_id
+                    FROM word_album_items
+                    WHERE album_id = ?
+                      AND word_id IN ($placeholders)
+                ";
+                $verifyStmt = $wordmageDb->prepare($verifySql);
+
+                $bindIndex = 1;
+                $verifyStmt->bindValue($bindIndex++, $albumId, \PDO::PARAM_INT);
+                foreach ($wordIds as $wordId) {
+                    $verifyStmt->bindValue($bindIndex++, $wordId, \PDO::PARAM_INT);
+                }
+                $verifyStmt->execute();
+
+                $existingWordIds = $verifyStmt->fetchAll(\PDO::FETCH_COLUMN, 0);
+                $existingWordIds = array_map('intval', $existingWordIds);
+
+                if (count($existingWordIds) !== count($wordIds)) {
+                    $wordmageDb->rollBack();
+                    return [
+                        'success' => false,
+                        'status' => 400,
+                        'error' => 'One or more word_id values are not in this album.'
+                    ];
+                }
+            }
+
+            // Reset all positions, then apply the provided position map.
+            $resetSql = "
+                UPDATE word_album_items
+                SET position = NULL
+                WHERE album_id = :album_id
+            ";
+            $resetStmt = $wordmageDb->prepare($resetSql);
+            $resetStmt->execute([':album_id' => $albumId]);
+
+            if (!empty($normalized)) {
+                $updateSql = "
+                    UPDATE word_album_items
+                    SET position = :position
+                    WHERE album_id = :album_id
+                      AND word_id = :word_id
+                    LIMIT 1
+                ";
+                $updateStmt = $wordmageDb->prepare($updateSql);
+
+                foreach ($normalized as $row) {
+                    $updateStmt->execute([
+                        ':position' => (int)$row['position'],
+                        ':album_id' => $albumId,
+                        ':word_id' => (int)$row['word_id']
+                    ]);
+                }
+            }
+
+            $touchSql = "
+                UPDATE word_albums
+                SET updated_at = CURRENT_TIMESTAMP
+                WHERE id = :album_id
+                  AND user_id = :user_id
+                LIMIT 1
+            ";
+            $touchStmt = $wordmageDb->prepare($touchSql);
+            $touchStmt->execute([
+                ':album_id' => $albumId,
+                ':user_id' => $userId
+            ]);
+
+            $wordmageDb->commit();
+
+            $albumResult = $this->getAlbumById($userId, $albumId);
+            if (!$albumResult['success']) {
+                return $albumResult;
+            }
+
+            return [
+                'success' => true,
+                'status' => 200,
+                'data' => $albumResult['data']['words']
+            ];
+        } catch (\Exception $e) {
+            if ($wordmageDb->inTransaction()) {
+                $wordmageDb->rollBack();
+            }
+
+            return [
+                'success' => false,
+                'status' => 500,
+                'error' => 'Could not update album words: ' . $e->getMessage()
+            ];
+        }
+    }
+
+
     public function updateAlbumTitle($userId, $albumId, $title)
     {
         global $wordmageDb;
