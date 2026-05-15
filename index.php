@@ -336,8 +336,16 @@ $app->put('/albums/{id}/words', function ($request, $response, $args) {
     $userId = 4; // replace later with actual logged-in user id
     $albumId = isset($args['id']) ? (int)$args['id'] : 0;
 
+    if (!is_array($data) || !isset($data['words']) || !is_array($data['words'])) {
+        return $response->withStatus(400)->withJson([
+            'error' => 'Request body must be an object with a words array.'
+        ]);
+    }
+
+    $words = $data['words'];
+
     $albums = new \WordMage\WordAlbums();
-    $result = $albums->updateAlbumWords($userId, $albumId, $data);
+    $result = $albums->updateAlbumWords($userId, $albumId, $words);
 
     if (!$result['success']) {
         return $response->withStatus($result['status'])->withJson([
