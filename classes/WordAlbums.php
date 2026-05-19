@@ -348,7 +348,7 @@ class WordAlbums
                     wa.title
                 FROM word_albums wa
                 WHERE wa.user_id = :userid
-                  AND wa.title IN ('Favorites', 'Learn')
+                  AND wa.title IN ('Favorites')
             ";
 
             $stmt = $wordmageDb->prepare($sql);
