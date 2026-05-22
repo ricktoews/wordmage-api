@@ -256,11 +256,12 @@ class WordAlbums
                     COUNT(wai.word_id) AS word_count
                 FROM word_albums wa
                 LEFT JOIN custom_moods cm ON cm.id = wa.custom_mood_id
-                LEFT JOIN word_album_items wai ON wai.album_id = wa.id
+                LEFT JOIN word_album_items wai
+                  ON wai.album_id = wa.id
+                 AND wai.position IS NOT NULL
                 WHERE wa.user_id = :user_id
                   AND wa.id = :album_id
-                  AND wai.position IS NOT NULL
-                                GROUP BY wa.id, wa.title, wa.custom_mood_id, cm.mood_text, wa.created_at, wa.updated_at
+                GROUP BY wa.id, wa.title, wa.custom_mood_id, cm.mood_text, wa.created_at, wa.updated_at
                 LIMIT 1
             ";
 
