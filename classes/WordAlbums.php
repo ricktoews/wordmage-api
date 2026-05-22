@@ -1746,12 +1746,33 @@ private function updateAlbumCoverPath($albumId, $coverPath)
 }
 
 
-public function addWordToAlbumFront($albumId, $wordId)
+public function addWordToAlbumFront($userId, $albumId, $wordId)
 {
     global $wordmageDb;
 
     try {
         $wordmageDb->beginTransaction();
+
+        $sql = "
+            SELECT id
+            FROM word_albums
+            WHERE id = :album_id
+              AND user_id = :user_id
+            LIMIT 1
+        ";
+        $stmt = $wordmageDb->prepare($sql);
+        $stmt->execute([
+            ':album_id' => $albumId,
+            ':user_id' => $userId
+        ]);
+
+        if (!$stmt->fetch(\PDO::FETCH_ASSOC)) {
+            $wordmageDb->rollBack();
+            return [
+                'success' => false,
+                'message' => 'Album not found or access denied.'
+            ];
+        }
 
         $sql = "
             SELECT position
@@ -1773,7 +1794,7 @@ public function addWordToAlbumFront($albumId, $wordId)
 
             if ($oldPosition === 1) {
                 $wordmageDb->commit();
-                return ['message' => 'Word is already at the front of the album'];
+                return ['success' => true, 'message' => 'Word is already at the front of the album'];
             }
 
             if ($oldPosition !== null) {
@@ -1817,7 +1838,7 @@ public function addWordToAlbumFront($albumId, $wordId)
 
             $wordmageDb->commit();
 
-            return ['message' => 'Word moved to front'];
+            return ['success' => true, 'message' => 'Word moved to front'];
         }
 
         $sql = "
@@ -1843,7 +1864,7 @@ public function addWordToAlbumFront($albumId, $wordId)
 
         $wordmageDb->commit();
 
-        return ['message' => 'Word added to front'];
+        return ['success' => true, 'message' => 'Word added to front'];
 
     } catch (\Throwable $e) {
         if ($wordmageDb->inTransaction()) {
@@ -1855,12 +1876,33 @@ public function addWordToAlbumFront($albumId, $wordId)
 }
 
 
-public function removeWordFromAlbum($albumId, $wordId)
+public function removeWordFromAlbum($userId, $albumId, $wordId)
 {
     global $wordmageDb;
 
     try {
         $wordmageDb->beginTransaction();
+
+        $sql = "
+            SELECT id
+            FROM word_albums
+            WHERE id = :album_id
+              AND user_id = :user_id
+            LIMIT 1
+        ";
+        $stmt = $wordmageDb->prepare($sql);
+        $stmt->execute([
+            ':album_id' => $albumId,
+            ':user_id' => $userId
+        ]);
+
+        if (!$stmt->fetch(\PDO::FETCH_ASSOC)) {
+            $wordmageDb->rollBack();
+            return [
+                'success' => false,
+                'message' => 'Album not found or access denied.'
+            ];
+        }
 
         $sql = "
             SELECT position
@@ -1880,7 +1922,7 @@ public function removeWordFromAlbum($albumId, $wordId)
 
         if (!$row) {
             $wordmageDb->rollBack();
-            return ['message' => 'Word not found in album'];
+            return ['success' => false, 'message' => 'Word not found in album'];
         }
 
         $position = (int)$row['position'];
@@ -1913,7 +1955,7 @@ public function removeWordFromAlbum($albumId, $wordId)
 
         $wordmageDb->commit();
 
-        return ['message' => 'Word removed from album'];
+        return ['success' => true, 'message' => 'Word removed from album'];
 
     } catch (\Throwable $e) {
         if ($wordmageDb->inTransaction()) {
@@ -1925,12 +1967,13 @@ public function removeWordFromAlbum($albumId, $wordId)
 }
 
 
-public function refreshAlbum($albumId)
+public function refreshAlbum($userId, $albumId)
 {
     global $wordmageDb;
 
+    $userId = (int)$userId;
     $albumId = (int)$albumId;
-    if ($albumId <= 0) {
+    if ($userId <= 0 || $albumId <= 0) {
         return [
             'success' => false,
             'status' => 400,
@@ -1940,6 +1983,27 @@ public function refreshAlbum($albumId)
 
     try {
         $wordmageDb->beginTransaction();
+
+        $albumStmt = $wordmageDb->prepare("
+            SELECT id
+            FROM word_albums
+            WHERE id = :album_id
+              AND user_id = :user_id
+            LIMIT 1
+        ");
+        $albumStmt->execute([
+            ':album_id' => $albumId,
+            ':user_id' => $userId
+        ]);
+
+        if (!$albumStmt->fetch(\PDO::FETCH_ASSOC)) {
+            $wordmageDb->rollBack();
+            return [
+                'success' => false,
+                'status' => 404,
+                'error' => 'Album not found or access denied.'
+            ];
+        }
 
         // 1) Load both locked words and NULL-position candidate pool in one query.
         $seedSql = "

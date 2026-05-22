@@ -63,22 +63,22 @@ error_log('Called EmailIsAvailable ' . $email);
 		try {
 			$wordmageDb->beginTransaction();
 
-			$anonymousToken = bin2hex(random_bytes(64));
+			$token = bin2hex(random_bytes(64));
 			$sql = "
 				INSERT INTO users (
 					is_anonymous,
-					anonymous_token,
+					token,
 					last_seen_at,
 					claimed_by_user_id
 				) VALUES (
 					1,
-					:anonymous_token,
+					:token,
 					NOW(),
 					NULL
 				)
 			";
 			$stmt = $wordmageDb->prepare($sql);
-			$stmt->execute(array(':anonymous_token' => $anonymousToken));
+			$stmt->execute(array(':token' => $token));
 			$userId = (int)$wordmageDb->lastInsertId();
 
 			$albumSql = "
@@ -97,7 +97,9 @@ error_log('Called EmailIsAvailable ' . $email);
 
 			return array(
 				'user_id' => $userId,
-				'anonymous_token' => $anonymousToken,
+				'token' => $token,
+				'anonymous_token' => $token,
+				'auth_token' => $token,
 				'favorites_album_id' => $favoritesAlbumId
 			);
 		} catch (\Exception $e) {
@@ -107,6 +109,34 @@ error_log('Called EmailIsAvailable ' . $email);
 
 			throw $e;
 		}
+	}
+
+	function ensureUserToken($userId) {
+		global $wordmageDb;
+
+		$userId = (int)$userId;
+		if ($userId <= 0) {
+			return null;
+		}
+
+		$sql = "SELECT token FROM users WHERE id=:id LIMIT 1";
+		$stmt = $wordmageDb->prepare($sql);
+		$stmt->execute(array(':id' => $userId));
+		$row = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+		if ($row && !empty($row['token'])) {
+			return $row['token'];
+		}
+
+		$token = bin2hex(random_bytes(64));
+		$sql = "UPDATE users SET token=:token WHERE id=:id";
+		$stmt = $wordmageDb->prepare($sql);
+		$stmt->execute(array(
+			':token' => $token,
+			':id' => $userId
+		));
+
+		return $token;
 	}
 
 
@@ -241,7 +271,11 @@ error_log('Called EmailIsAvailable ' . $email);
 		$stmt->execute($params);
 		$payload = array();
 		if ($stmt->fetch()) {
+			$token = $this->ensureUserToken($user_id);
 			$payload['user_id'] = $user_id;
+			$payload['token'] = $token;
+			$payload['anonymous_token'] = $token;
+			$payload['auth_token'] = $token;
 			$payload['custom'] = $custom;
 		}
 		else {

@@ -9,6 +9,13 @@ class UserWordLearning
         global $wordmageDb;
 
         $userId = self::getUserId($request);
+        if (!$userId) {
+            return $response->withJson([
+                "success" => false,
+                "error" => "Unauthorized"
+            ], 401);
+        }
+
         $albumId = isset($args['album_id']) ? (int)$args['album_id'] : 10;
         $limit = 10;
 
@@ -65,6 +72,13 @@ class UserWordLearning
         global $wordmageDb;
 
         $userId = self::getUserId($request);
+        if (!$userId) {
+            return $response->withJson([
+                "success" => false,
+                "error" => "Unauthorized"
+            ], 401);
+        }
+
         $data = json_decode($request->getBody()->getContents(), true);
 
         $wordId = isset($data['word_id']) ? (int)$data['word_id'] : 0;
@@ -190,11 +204,35 @@ class UserWordLearning
 
     private static function getUserId($request)
     {
-        // Adjust this to match however WordMage currently identifies users.
-        // Common possibilities:
-        // return (int)$request->getAttribute('user_id');
-        // return (int)$_SESSION['user_id'];
+        global $wordmageDb;
 
-        return 4;
+        $authorization = $request->getHeaderLine('Authorization');
+
+        if (!$authorization && isset($_SERVER['HTTP_AUTHORIZATION'])) {
+            $authorization = $_SERVER['HTTP_AUTHORIZATION'];
+        }
+        if (!$authorization && isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+            $authorization = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+        }
+
+        if (!preg_match('/Bearer\s+(.+)/i', $authorization, $matches)) {
+            return null;
+        }
+
+        $token = trim($matches[1]);
+        if (!$token || !$wordmageDb) {
+            return null;
+        }
+
+        $stmt = $wordmageDb->prepare("
+            SELECT id
+            FROM users
+            WHERE token = :token
+            LIMIT 1
+        ");
+        $stmt->execute([':token' => $token]);
+
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        return $row ? (int)$row['id'] : null;
     }
 }

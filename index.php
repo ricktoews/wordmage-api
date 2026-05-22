@@ -12,6 +12,49 @@ require __DIR__ . '/vendor/autoload.php';
 
 $app = new \Slim\App;
 
+function getBearerToken(Request $request) {
+	$authorization = $request->getHeaderLine('Authorization');
+
+	if (!$authorization && isset($_SERVER['HTTP_AUTHORIZATION'])) {
+		$authorization = $_SERVER['HTTP_AUTHORIZATION'];
+	}
+	if (!$authorization && isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+		$authorization = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+	}
+
+	if (preg_match('/Bearer\s+(.+)/i', $authorization, $matches)) {
+		return trim($matches[1]);
+	}
+
+	return null;
+}
+
+function getAuthenticatedUserId(Request $request) {
+	global $wordmageDb;
+
+	$token = getBearerToken($request);
+	if (!$token || !$wordmageDb) {
+		return null;
+	}
+
+	$stmt = $wordmageDb->prepare("
+		SELECT id
+		FROM users
+		WHERE token = :token
+		LIMIT 1
+	");
+	$stmt->execute(array(':token' => $token));
+
+	$row = $stmt->fetch(PDO::FETCH_ASSOC);
+	return $row ? (int)$row['id'] : null;
+}
+
+function unauthorizedResponse(Response $response) {
+	return $response->withStatus(401)->withJson(array(
+		'error' => 'Unauthorized'
+	));
+}
+
 //-----------------------------------------------------------------------------
 // CORS
 //-----------------------------------------------------------------------------
@@ -248,7 +291,11 @@ $app->delete('/custom-moods/{id}', function ($request, $response, $args) {
  */
 
 $app->get('/albums', function ($request, $response) {
-    $userId = 4; // replace later with actual logged-in user id
+    $userId = getAuthenticatedUserId($request);
+    if (!$userId) {
+        return unauthorizedResponse($response);
+    }
+
     $limit = $request->getParam('limit', 50);
 
     $albums = new \WordMage\WordAlbums();
@@ -264,7 +311,11 @@ $app->get('/albums', function ($request, $response) {
 });
 
 $app->get('/albums/{id}', function ($request, $response, $args) {
-    $userId = 4; // replace later with actual logged-in user id
+    $userId = getAuthenticatedUserId($request);
+    if (!$userId) {
+        return unauthorizedResponse($response);
+    }
+
     $albumId = isset($args['id']) ? (int)$args['id'] : 0;
 
     $albums = new \WordMage\WordAlbums();
@@ -282,7 +333,11 @@ $app->get('/albums/{id}', function ($request, $response, $args) {
 $app->post('/albums', function ($request, $response) {
     $data = json_decode($request->getBody()->getContents(), true);
 
-    $userId = 4; // replace later with actual logged-in user id
+    $userId = getAuthenticatedUserId($request);
+    if (!$userId) {
+        return unauthorizedResponse($response);
+    }
+
     $title = isset($data['title']) ? trim($data['title']) : '';
     $moodText = isset($data['mood_text']) ? trim($data['mood_text']) : null;
     $wordIds = isset($data['word_ids']) && is_array($data['word_ids']) ? $data['word_ids'] : [];
@@ -313,7 +368,11 @@ $app->post('/albums', function ($request, $response) {
 $app->put('/albums/{id}', function ($request, $response, $args) {
     $data = json_decode($request->getBody()->getContents(), true);
 
-    $userId = 4; // replace later with actual logged-in user id
+    $userId = getAuthenticatedUserId($request);
+    if (!$userId) {
+        return unauthorizedResponse($response);
+    }
+
     $albumId = isset($args['id']) ? (int)$args['id'] : 0;
     $title = isset($data['title']) ? trim($data['title']) : '';
     $moodText = isset($data['mood_text']) ? trim($data['mood_text']) : '';
@@ -334,7 +393,11 @@ $app->put('/albums/{id}', function ($request, $response, $args) {
 $app->put('/albums/{id}/words', function ($request, $response, $args) {
     $data = json_decode($request->getBody()->getContents(), true);
 
-    $userId = 4; // replace later with actual logged-in user id
+    $userId = getAuthenticatedUserId($request);
+    if (!$userId) {
+        return unauthorizedResponse($response);
+    }
+
     $albumId = isset($args['id']) ? (int)$args['id'] : 0;
 
     if (!is_array($data) || !isset($data['words']) || !is_array($data['words'])) {
@@ -360,7 +423,11 @@ $app->put('/albums/{id}/words', function ($request, $response, $args) {
 $app->patch('/albums/{id}/mood-text', function ($request, $response, $args) {
     $data = json_decode($request->getBody()->getContents(), true);
 
-    $userId = 4; // replace later with actual logged-in user id
+    $userId = getAuthenticatedUserId($request);
+    if (!$userId) {
+        return unauthorizedResponse($response);
+    }
+
     $albumId = isset($args['id']) ? (int)$args['id'] : 0;
     $moodText = isset($data['mood_text']) ? trim((string)$data['mood_text']) : '';
 
@@ -377,10 +444,15 @@ $app->patch('/albums/{id}/mood-text', function ($request, $response, $args) {
 });
 
 $app->post('/albums/{id}/refresh', function ($request, $response, $args) {
+    $userId = getAuthenticatedUserId($request);
+    if (!$userId) {
+        return unauthorizedResponse($response);
+    }
+
     $albumId = isset($args['id']) ? (int)$args['id'] : 0;
 
     $albums = new \WordMage\WordAlbums();
-    $result = $albums->refreshAlbum($albumId);
+    $result = $albums->refreshAlbum($userId, $albumId);
 
     if (!$result['success']) {
         return $response->withStatus($result['status'])->withJson([
@@ -394,6 +466,11 @@ $app->post('/albums/{id}/refresh', function ($request, $response, $args) {
 
 $app->post('/albums/add-word', function ($request, $response) {
     $data = json_decode($request->getBody()->getContents(), true);
+
+    $userId = getAuthenticatedUserId($request);
+    if (!$userId) {
+        return unauthorizedResponse($response);
+    }
 
     $albumId = (int)($data['album_id'] ?? 0);
     $wordId  = (int)($data['word_id'] ?? 0);
@@ -410,14 +487,17 @@ $app->post('/albums/add-word', function ($request, $response) {
 
     try {
         $wordAlbums = new \WordMage\WordAlbums();
-        $result = $wordAlbums->addWordToAlbumFront($albumId, $wordId);
+        $result = $wordAlbums->addWordToAlbumFront($userId, $albumId, $wordId);
+        $success = !isset($result['success']) || $result['success'];
 
         $response->getBody()->write(json_encode([
-            'success' => true,
+            'success' => $success,
             'message' => $result['message']
         ]));
 
-        return $response->withHeader('Content-Type', 'application/json');
+        return $response
+            ->withStatus($success ? 200 : 404)
+            ->withHeader('Content-Type', 'application/json');
 
     } catch (\Throwable $e) {
         $response->getBody()->write(json_encode([
@@ -435,6 +515,11 @@ $app->post('/albums/add-word', function ($request, $response) {
 $app->post('/albums/delete-word', function ($request, $response) {
     $data = json_decode($request->getBody()->getContents(), true);
 
+    $userId = getAuthenticatedUserId($request);
+    if (!$userId) {
+        return unauthorizedResponse($response);
+    }
+
     $albumId = (int)($data['album_id'] ?? 0);
     $wordId  = (int)($data['word_id'] ?? 0);
 
@@ -451,14 +536,17 @@ $app->post('/albums/delete-word', function ($request, $response) {
 
     try {
         $wordAlbums = new \WordMage\WordAlbums();
-        $result = $wordAlbums->removeWordFromAlbum($albumId, $wordId);
+        $result = $wordAlbums->removeWordFromAlbum($userId, $albumId, $wordId);
+        $success = !isset($result['success']) || $result['success'];
 
         $response->getBody()->write(json_encode([
-            'success' => true,
+            'success' => $success,
             'message' => $result['message']
         ]));
 
-        return $response->withHeader('Content-Type', 'application/json');
+        return $response
+            ->withStatus($success ? 200 : 404)
+            ->withHeader('Content-Type', 'application/json');
 
     } catch (\Throwable $e) {
         $response->getBody()->write(json_encode([
@@ -474,14 +562,9 @@ $app->post('/albums/delete-word', function ($request, $response) {
 
 
 $app->patch('/albums/{albumId}/words/{wordId}/lock', function ($request, $response, $args) {
-    $userId = 4;
-
+    $userId = getAuthenticatedUserId($request);
     if (!$userId) {
-        $payload = [
-            'success' => false,
-            'message' => 'Unauthorized.'
-        ];
-        return $response->withJson($payload, 401);
+        return unauthorizedResponse($response);
     }
 
     $albumId = (int)$args['albumId'];
@@ -523,7 +606,11 @@ $app->patch('/albums/{albumId}/words/{wordId}/lock', function ($request, $respon
 
 
 $app->delete('/albums/{id}', function ($request, $response, $args) {
-    $userId = 4; // replace later with actual logged-in user id
+    $userId = getAuthenticatedUserId($request);
+    if (!$userId) {
+        return unauthorizedResponse($response);
+    }
+
     $albumId = isset($args['id']) ? (int)$args['id'] : 0;
 
     $albums = new \WordMage\WordAlbums();
@@ -561,7 +648,11 @@ function getWords(Request $request, Response $response) {
 function getRandomPageData($request, $response, $args) {
     $body = $request->getBody();
     $data = json_decode($body, true);
-    $user_id = $data['user_id'];
+    $user_id = getAuthenticatedUserId($request);
+    if (!$user_id) {
+        return unauthorizedResponse($response);
+    }
+
     $count = isset($data['count']) ? $data['count'] : 20;
 
     $count = (int)$count;
@@ -684,7 +775,14 @@ function register(Request $request, Response $response) {
 	if ($result) {
 		$id = $register->registerEmail($email, $password);
 		$customId = $register->registerCustom($id, $custom);
-		$payload = array('status' => true, 'user_id' => $id);
+		$token = $register->ensureUserToken($id);
+		$payload = array(
+			'status' => true,
+			'user_id' => $id,
+			'token' => $token,
+			'anonymous_token' => $token,
+			'auth_token' => $token
+		);
 	}
 	else {
 		$payload = array('status' => false, 'msg' => 'Email already registered.');
@@ -708,9 +806,11 @@ function createAnonymousUser(Request $request, Response $response) {
 }
 
 function loadCustom(Request $request, Response $response) {
-        $body = $request->getBody();
-        $data = json_decode($body, true);
-        $user_id = $data['user_id'];
+        $user_id = getAuthenticatedUserId($request);
+        if (!$user_id) {
+            return unauthorizedResponse($response);
+        }
+
 //      Remove unneeded data from initial load.
 //        $register = new Register();
 //        $custom_data = $register->loadCustom($user_id);
@@ -730,7 +830,11 @@ function loadCustom(Request $request, Response $response) {
 function saveCustom(Request $request, Response $response) {
 	$body = $request->getBody();
 	$data = json_decode($body, true);
-	$user_id = $data['user_id'];
+	$user_id = getAuthenticatedUserId($request);
+	if (!$user_id) {
+		return unauthorizedResponse($response);
+	}
+
 	$custom = json_encode($data['custom']);
 	$wordObj = isset($data['wordObj']) ? $data['wordObj'] : null;
 	$register = new Register();
@@ -742,7 +846,11 @@ function saveCustom(Request $request, Response $response) {
 function saveTraining(Request $request, Response $response) {
 	$body = $request->getBody();
 	$data = json_decode($body, true);
-	$user_id = $data['user_id'];
+	$user_id = getAuthenticatedUserId($request);
+	if (!$user_id) {
+		return unauthorizedResponse($response);
+	}
+
 	$training = json_encode($data['training']);
 	$register = new Register();
 	$result = $register->saveTraining($user_id, $training);
