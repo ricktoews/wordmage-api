@@ -30,6 +30,7 @@ $app->add(function ($request, $response, $next) {
 
 $app->post('/login', 'login');
 $app->post('/register', 'register');
+$app->post('/anonymous-user', 'createAnonymousUser');
 $app->post('/loadcustom', 'loadCustom');
 $app->post('/savecustom', 'saveCustom');
 $app->post('/savetraining', 'saveTraining');
@@ -690,6 +691,20 @@ function register(Request $request, Response $response) {
 	}
 	echo json_encode($payload);
 
+}
+
+function createAnonymousUser(Request $request, Response $response) {
+	$register = new Register();
+
+	try {
+		$payload = $register->createAnonymousUser();
+		return $response->withJson($payload);
+	} catch (Exception $e) {
+		error_log('createAnonymousUser failed: ' . $e->getMessage());
+		return $response->withStatus(500)->withJson(array(
+			'error' => 'Unable to create anonymous user.'
+		));
+	}
 }
 
 function loadCustom(Request $request, Response $response) {

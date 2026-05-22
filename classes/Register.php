@@ -57,6 +57,33 @@ error_log('Called EmailIsAvailable ' . $email);
 	}
 
 
+	function createAnonymousUser() {
+		global $wordmageDb;
+
+		$anonymousToken = bin2hex(random_bytes(64));
+		$sql = "
+			INSERT INTO users (
+				is_anonymous,
+				anonymous_token,
+				last_seen_at,
+				claimed_by_user_id
+			) VALUES (
+				1,
+				:anonymous_token,
+				NOW(),
+				NULL
+			)
+		";
+		$stmt = $wordmageDb->prepare($sql);
+		$stmt->execute(array(':anonymous_token' => $anonymousToken));
+
+		return array(
+			'user_id' => (int)$wordmageDb->lastInsertId(),
+			'anonymous_token' => $anonymousToken
+		);
+	}
+
+
 	function registerCustom($user_id, $custom) {
 		global $wordmageDb;
 
