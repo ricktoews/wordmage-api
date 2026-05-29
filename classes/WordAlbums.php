@@ -345,11 +345,12 @@ class WordAlbums
         try {
             $sql = "
                 SELECT
-                    wa.id AS album_id,
+                    MIN(wa.id) AS album_id,
                     wa.title
                 FROM word_albums wa
                 WHERE wa.user_id = :userid
                   AND wa.title IN ('Favorites')
+                GROUP BY wa.title
             ";
 
             $stmt = $wordmageDb->prepare($sql);
@@ -445,7 +446,11 @@ class WordAlbums
                 ];
             }
 
-            if (!empty($anonymousUser['claimed_by_user_id']) && (int)$anonymousUser['claimed_by_user_id'] !== $userId) {
+            $claimedByUserId = !empty($anonymousUser['claimed_by_user_id'])
+                ? (int)$anonymousUser['claimed_by_user_id']
+                : null;
+
+            if ($claimedByUserId && $claimedByUserId !== $userId) {
                 $wordmageDb->rollBack();
                 return [
                     'success' => false,
@@ -462,10 +467,17 @@ class WordAlbums
                 $albumParams[$placeholder] = $albumId;
             }
 
+            if ($claimedByUserId === $userId) {
+                $albumOwnerCondition = "user_id IN (:anonymous_user_id, :user_id)";
+                $albumParams[':user_id'] = $userId;
+            } else {
+                $albumOwnerCondition = "user_id = :anonymous_user_id";
+            }
+
             $albumStmt = $wordmageDb->prepare("
-                SELECT id, title, source_type
+                SELECT id, title, source_type, user_id
                 FROM word_albums
-                WHERE user_id = :anonymous_user_id
+                WHERE {$albumOwnerCondition}
                   AND id IN (" . implode(',', $albumPlaceholders) . ")
             ");
             $albumStmt->execute($albumParams);
@@ -479,8 +491,8 @@ class WordAlbums
                 $albumId = (int)$album['id'];
                 unset($missingAlbumIds[$albumId]);
 
-                if ($album['title'] === 'Favorites' && $album['source_type'] === 'system') {
-                    $favoriteAlbumId = $this->getFavoriteAlbumIdForUser($userId);
+                if ($album['title'] === 'Favorites') {
+                    $favoriteAlbumId = $this->getFavoriteAlbumIdForUser($userId, $albumId);
                     if ($favoriteAlbumId && $favoriteAlbumId !== $albumId) {
                         $this->mergeAlbumItems($albumId, $favoriteAlbumId);
                         $this->deleteAlbumOnly($albumId);
@@ -542,19 +554,28 @@ class WordAlbums
         }
     }
 
-    private function getFavoriteAlbumIdForUser($userId)
+    private function getFavoriteAlbumIdForUser($userId, $excludeAlbumId = null)
     {
         global $wordmageDb;
+
+        $excludeAlbumId = (int)$excludeAlbumId;
+        $excludeSql = $excludeAlbumId > 0 ? "AND id <> :exclude_album_id" : "";
 
         $stmt = $wordmageDb->prepare("
             SELECT id
             FROM word_albums
             WHERE user_id = :user_id
               AND title = 'Favorites'
-              AND source_type = 'system'
+              {$excludeSql}
+            ORDER BY id ASC
             LIMIT 1
         ");
-        $stmt->execute([':user_id' => (int)$userId]);
+
+        $params = [':user_id' => (int)$userId];
+        if ($excludeAlbumId > 0) {
+            $params[':exclude_album_id'] = $excludeAlbumId;
+        }
+        $stmt->execute($params);
 
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
         return $row ? (int)$row['id'] : null;
