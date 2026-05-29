@@ -374,19 +374,20 @@ class WordAlbums
         }
     }
 
-    public function claimAnonymousAlbums($userId, $anonymousUserId, $anonymousToken, array $albumIds)
+    public function claimAnonymousAlbums($userId, $anonymousUserId, $anonymousToken, array $albumIds, $deleteRemainingAlbums = false)
     {
         global $wordmageDb;
 
         $userId = (int)$userId;
         $anonymousUserId = (int)$anonymousUserId;
         $anonymousToken = trim((string)$anonymousToken);
+        $deleteRemainingAlbums = (bool)$deleteRemainingAlbums;
 
         $albumIds = array_values(array_unique(array_filter(array_map('intval', $albumIds), function ($albumId) {
             return $albumId > 0;
         })));
 
-        if ($userId <= 0 || $anonymousUserId <= 0 || $anonymousToken === '' || count($albumIds) === 0) {
+        if ($userId <= 0 || $anonymousUserId <= 0 || $anonymousToken === '') {
             return [
                 'success' => false,
                 'status' => 400,
@@ -459,33 +460,40 @@ class WordAlbums
                 ];
             }
 
-            $albumPlaceholders = [];
-            $albumParams = [':anonymous_user_id' => $anonymousUserId];
-            foreach ($albumIds as $index => $albumId) {
-                $placeholder = ':album_id_' . $index;
-                $albumPlaceholders[] = $placeholder;
-                $albumParams[$placeholder] = $albumId;
-            }
-
             if ($claimedByUserId === $userId) {
                 $albumOwnerCondition = "user_id IN (:anonymous_user_id, :user_id)";
-                $albumParams[':user_id'] = $userId;
             } else {
                 $albumOwnerCondition = "user_id = :anonymous_user_id";
             }
 
-            $albumStmt = $wordmageDb->prepare("
-                SELECT id, title, source_type, user_id
-                FROM word_albums
-                WHERE {$albumOwnerCondition}
-                  AND id IN (" . implode(',', $albumPlaceholders) . ")
-            ");
-            $albumStmt->execute($albumParams);
-            $albums = $albumStmt->fetchAll(\PDO::FETCH_ASSOC);
-
             $claimedAlbumIds = [];
             $mergedAlbumIds = [];
+            $deletedAlbumIds = [];
             $missingAlbumIds = array_fill_keys($albumIds, true);
+
+            if (count($albumIds) > 0) {
+                $albumPlaceholders = [];
+                $albumParams = [':anonymous_user_id' => $anonymousUserId];
+                foreach ($albumIds as $index => $albumId) {
+                    $placeholder = ':album_id_' . $index;
+                    $albumPlaceholders[] = $placeholder;
+                    $albumParams[$placeholder] = $albumId;
+                }
+                if ($claimedByUserId === $userId) {
+                    $albumParams[':user_id'] = $userId;
+                }
+
+                $albumStmt = $wordmageDb->prepare("
+                    SELECT id, title, source_type, user_id
+                    FROM word_albums
+                    WHERE {$albumOwnerCondition}
+                      AND id IN (" . implode(',', $albumPlaceholders) . ")
+                ");
+                $albumStmt->execute($albumParams);
+                $albums = $albumStmt->fetchAll(\PDO::FETCH_ASSOC);
+            } else {
+                $albums = [];
+            }
 
             foreach ($albums as $album) {
                 $albumId = (int)$album['id'];
@@ -518,6 +526,21 @@ class WordAlbums
                 }
             }
 
+            if ($deleteRemainingAlbums) {
+                $remainingStmt = $wordmageDb->prepare("
+                    SELECT id
+                    FROM word_albums
+                    WHERE user_id = :anonymous_user_id
+                ");
+                $remainingStmt->execute([':anonymous_user_id' => $anonymousUserId]);
+                $remainingAlbumIds = array_map('intval', $remainingStmt->fetchAll(\PDO::FETCH_COLUMN, 0));
+
+                foreach ($remainingAlbumIds as $remainingAlbumId) {
+                    $this->deleteAlbumOnly($remainingAlbumId);
+                    $deletedAlbumIds[] = $remainingAlbumId;
+                }
+            }
+
             $claimStmt = $wordmageDb->prepare("
                 UPDATE users
                 SET claimed_by_user_id = :user_id,
@@ -538,6 +561,7 @@ class WordAlbums
                     'success' => true,
                     'claimed_album_ids' => $claimedAlbumIds,
                     'merged_album_ids' => $mergedAlbumIds,
+                    'deleted_album_ids' => $deletedAlbumIds,
                     'missing_album_ids' => array_map('intval', array_keys($missingAlbumIds))
                 ]
             ];

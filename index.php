@@ -822,15 +822,18 @@ function claimAnonymousUserAlbums(Request $request, Response $response) {
 	$anonymousUserId = isset($data['anonymous_user_id']) ? (int)$data['anonymous_user_id'] : 0;
 	$anonymousToken = isset($data['anonymous_token']) ? trim((string)$data['anonymous_token']) : '';
 	$albumIds = isset($data['album_ids']) && is_array($data['album_ids']) ? $data['album_ids'] : array();
+	$deleteRemainingAlbums = isset($data['delete_remaining_albums'])
+		? filter_var($data['delete_remaining_albums'], FILTER_VALIDATE_BOOLEAN)
+		: false;
 
-	if ($anonymousUserId <= 0 || $anonymousToken === '' || count($albumIds) === 0) {
+	if ($anonymousUserId <= 0 || $anonymousToken === '') {
 		return $response->withStatus(400)->withJson(array(
-			'error' => 'anonymous_user_id, anonymous_token, and album_ids are required.'
+			'error' => 'anonymous_user_id and anonymous_token are required.'
 		));
 	}
 
 	$wordAlbums = new \WordMage\WordAlbums();
-	$result = $wordAlbums->claimAnonymousAlbums($userId, $anonymousUserId, $anonymousToken, $albumIds);
+	$result = $wordAlbums->claimAnonymousAlbums($userId, $anonymousUserId, $anonymousToken, $albumIds, $deleteRemainingAlbums);
 
 	if (!$result['success']) {
 		return $response->withStatus($result['status'])->withJson(array(
