@@ -373,6 +373,237 @@ class WordAlbums
         }
     }
 
+    public function claimAnonymousAlbums($userId, $anonymousUserId, $anonymousToken, array $albumIds)
+    {
+        global $wordmageDb;
+
+        $userId = (int)$userId;
+        $anonymousUserId = (int)$anonymousUserId;
+        $anonymousToken = trim((string)$anonymousToken);
+
+        $albumIds = array_values(array_unique(array_filter(array_map('intval', $albumIds), function ($albumId) {
+            return $albumId > 0;
+        })));
+
+        if ($userId <= 0 || $anonymousUserId <= 0 || $anonymousToken === '' || count($albumIds) === 0) {
+            return [
+                'success' => false,
+                'status' => 400,
+                'error' => 'Invalid claim request.'
+            ];
+        }
+
+        if ($userId === $anonymousUserId) {
+            return [
+                'success' => false,
+                'status' => 400,
+                'error' => 'Anonymous user and authenticated user must be different.'
+            ];
+        }
+
+        try {
+            $wordmageDb->beginTransaction();
+
+            $targetUserStmt = $wordmageDb->prepare("
+                SELECT id
+                FROM users
+                WHERE id = :user_id
+                  AND is_anonymous = 0
+                LIMIT 1
+            ");
+            $targetUserStmt->execute([':user_id' => $userId]);
+
+            if (!$targetUserStmt->fetch(\PDO::FETCH_ASSOC)) {
+                $wordmageDb->rollBack();
+                return [
+                    'success' => false,
+                    'status' => 403,
+                    'error' => 'Authenticated user must be a registered account.'
+                ];
+            }
+
+            $userStmt = $wordmageDb->prepare("
+                SELECT id, claimed_by_user_id
+                FROM users
+                WHERE id = :anonymous_user_id
+                  AND token = :anonymous_token
+                  AND is_anonymous = 1
+                LIMIT 1
+            ");
+            $userStmt->execute([
+                ':anonymous_user_id' => $anonymousUserId,
+                ':anonymous_token' => $anonymousToken
+            ]);
+            $anonymousUser = $userStmt->fetch(\PDO::FETCH_ASSOC);
+
+            if (!$anonymousUser) {
+                $wordmageDb->rollBack();
+                return [
+                    'success' => false,
+                    'status' => 403,
+                    'error' => 'Anonymous user token is invalid.'
+                ];
+            }
+
+            if (!empty($anonymousUser['claimed_by_user_id']) && (int)$anonymousUser['claimed_by_user_id'] !== $userId) {
+                $wordmageDb->rollBack();
+                return [
+                    'success' => false,
+                    'status' => 409,
+                    'error' => 'Anonymous user has already been claimed by another account.'
+                ];
+            }
+
+            $albumPlaceholders = [];
+            $albumParams = [':anonymous_user_id' => $anonymousUserId];
+            foreach ($albumIds as $index => $albumId) {
+                $placeholder = ':album_id_' . $index;
+                $albumPlaceholders[] = $placeholder;
+                $albumParams[$placeholder] = $albumId;
+            }
+
+            $albumStmt = $wordmageDb->prepare("
+                SELECT id, title, source_type
+                FROM word_albums
+                WHERE user_id = :anonymous_user_id
+                  AND id IN (" . implode(',', $albumPlaceholders) . ")
+            ");
+            $albumStmt->execute($albumParams);
+            $albums = $albumStmt->fetchAll(\PDO::FETCH_ASSOC);
+
+            $claimedAlbumIds = [];
+            $mergedAlbumIds = [];
+            $missingAlbumIds = array_fill_keys($albumIds, true);
+
+            foreach ($albums as $album) {
+                $albumId = (int)$album['id'];
+                unset($missingAlbumIds[$albumId]);
+
+                if ($album['title'] === 'Favorites' && $album['source_type'] === 'system') {
+                    $favoriteAlbumId = $this->getFavoriteAlbumIdForUser($userId);
+                    if ($favoriteAlbumId && $favoriteAlbumId !== $albumId) {
+                        $this->mergeAlbumItems($albumId, $favoriteAlbumId);
+                        $this->deleteAlbumOnly($albumId);
+                        $mergedAlbumIds[] = $albumId;
+                        continue;
+                    }
+                }
+
+                $updateStmt = $wordmageDb->prepare("
+                    UPDATE word_albums
+                    SET user_id = :user_id
+                    WHERE id = :album_id
+                      AND user_id = :anonymous_user_id
+                ");
+                $updateStmt->execute([
+                    ':user_id' => $userId,
+                    ':album_id' => $albumId,
+                    ':anonymous_user_id' => $anonymousUserId
+                ]);
+
+                if ($updateStmt->rowCount() > 0) {
+                    $claimedAlbumIds[] = $albumId;
+                }
+            }
+
+            $claimStmt = $wordmageDb->prepare("
+                UPDATE users
+                SET claimed_by_user_id = :user_id,
+                    last_seen_at = NOW()
+                WHERE id = :anonymous_user_id
+            ");
+            $claimStmt->execute([
+                ':user_id' => $userId,
+                ':anonymous_user_id' => $anonymousUserId
+            ]);
+
+            $wordmageDb->commit();
+
+            return [
+                'success' => true,
+                'status' => 200,
+                'data' => [
+                    'success' => true,
+                    'claimed_album_ids' => $claimedAlbumIds,
+                    'merged_album_ids' => $mergedAlbumIds,
+                    'missing_album_ids' => array_map('intval', array_keys($missingAlbumIds))
+                ]
+            ];
+        } catch (\Exception $e) {
+            if ($wordmageDb->inTransaction()) {
+                $wordmageDb->rollBack();
+            }
+
+            return [
+                'success' => false,
+                'status' => 500,
+                'error' => 'Could not claim anonymous albums: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    private function getFavoriteAlbumIdForUser($userId)
+    {
+        global $wordmageDb;
+
+        $stmt = $wordmageDb->prepare("
+            SELECT id
+            FROM word_albums
+            WHERE user_id = :user_id
+              AND title = 'Favorites'
+              AND source_type = 'system'
+            LIMIT 1
+        ");
+        $stmt->execute([':user_id' => (int)$userId]);
+
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        return $row ? (int)$row['id'] : null;
+    }
+
+    private function mergeAlbumItems($sourceAlbumId, $targetAlbumId)
+    {
+        global $wordmageDb;
+
+        $stmt = $wordmageDb->prepare("
+            INSERT INTO word_album_items (album_id, word_id, position, is_locked)
+            SELECT
+                :target_album_id,
+                source_items.word_id,
+                NULL,
+                source_items.is_locked
+            FROM word_album_items source_items
+            WHERE source_items.album_id = :source_album_id
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM word_album_items target_items
+                  WHERE target_items.album_id = :target_album_id_exists
+                    AND target_items.word_id = source_items.word_id
+              )
+        ");
+        $stmt->execute([
+            ':target_album_id' => (int)$targetAlbumId,
+            ':source_album_id' => (int)$sourceAlbumId,
+            ':target_album_id_exists' => (int)$targetAlbumId
+        ]);
+    }
+
+    private function deleteAlbumOnly($albumId)
+    {
+        global $wordmageDb;
+
+        $deleteItemsStmt = $wordmageDb->prepare("
+            DELETE FROM word_album_items
+            WHERE album_id = :album_id
+        ");
+        $deleteItemsStmt->execute([':album_id' => (int)$albumId]);
+
+        $deleteAlbumStmt = $wordmageDb->prepare("
+            DELETE FROM word_albums
+            WHERE id = :album_id
+        ");
+        $deleteAlbumStmt->execute([':album_id' => (int)$albumId]);
+    }
+
     public function getFeaturedFavoriteByUser($userid) {
         global $wordmageDb;
 

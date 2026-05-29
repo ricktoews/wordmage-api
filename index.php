@@ -74,6 +74,7 @@ $app->add(function ($request, $response, $next) {
 $app->post('/login', 'login');
 $app->post('/register', 'register');
 $app->post('/anonymous-user', 'createAnonymousUser');
+$app->post('/anonymous-user/claim-albums', 'claimAnonymousUserAlbums');
 $app->post('/loadcustom', 'loadCustom');
 $app->post('/savecustom', 'saveCustom');
 $app->post('/savetraining', 'saveTraining');
@@ -803,6 +804,41 @@ function createAnonymousUser(Request $request, Response $response) {
 			'error' => 'Unable to create anonymous user.'
 		));
 	}
+}
+
+function claimAnonymousUserAlbums(Request $request, Response $response) {
+	$userId = getAuthenticatedUserId($request);
+	if (!$userId) {
+		return unauthorizedResponse($response);
+	}
+
+	$data = json_decode($request->getBody()->getContents(), true);
+	if (!is_array($data)) {
+		return $response->withStatus(400)->withJson(array(
+			'error' => 'Request body must be valid JSON.'
+		));
+	}
+
+	$anonymousUserId = isset($data['anonymous_user_id']) ? (int)$data['anonymous_user_id'] : 0;
+	$anonymousToken = isset($data['anonymous_token']) ? trim((string)$data['anonymous_token']) : '';
+	$albumIds = isset($data['album_ids']) && is_array($data['album_ids']) ? $data['album_ids'] : array();
+
+	if ($anonymousUserId <= 0 || $anonymousToken === '' || count($albumIds) === 0) {
+		return $response->withStatus(400)->withJson(array(
+			'error' => 'anonymous_user_id, anonymous_token, and album_ids are required.'
+		));
+	}
+
+	$wordAlbums = new \WordMage\WordAlbums();
+	$result = $wordAlbums->claimAnonymousAlbums($userId, $anonymousUserId, $anonymousToken, $albumIds);
+
+	if (!$result['success']) {
+		return $response->withStatus($result['status'])->withJson(array(
+			'error' => $result['error']
+		));
+	}
+
+	return $response->withJson($result['data']);
 }
 
 function loadCustom(Request $request, Response $response) {
