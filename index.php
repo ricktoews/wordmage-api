@@ -79,6 +79,7 @@ $app->post('/loadcustom', 'loadCustom');
 $app->post('/savecustom', 'saveCustom');
 $app->post('/savetraining', 'saveTraining');
 $app->get('/shared/albums/{share_token}', 'getSharedAlbumSnapshot');
+$app->post('/shared/albums/{share_token}/keep', 'keepSharedAlbumSnapshot');
 $app->post('/capture', 'extractWordsFromPage');
 $app->post('/locate', 'locate');
 $app->post('/test-image-analysis', 'testImageAnalysis');
@@ -870,6 +871,26 @@ function getSharedAlbumSnapshot(Request $request, Response $response, array $arg
 
 	$wordAlbums = new \WordMage\WordAlbums();
 	$result = $wordAlbums->getSharedAlbumSnapshot($shareToken);
+
+	if (!$result['success']) {
+		return $response->withStatus($result['status'])->withJson(array(
+			'error' => $result['error']
+		));
+	}
+
+	return $response->withJson($result['data']);
+}
+
+function keepSharedAlbumSnapshot(Request $request, Response $response, array $args) {
+	$userId = getAuthenticatedUserId($request);
+	if (!$userId) {
+		return unauthorizedResponse($response);
+	}
+
+	$shareToken = isset($args['share_token']) ? trim((string)$args['share_token']) : '';
+
+	$wordAlbums = new \WordMage\WordAlbums();
+	$result = $wordAlbums->keepSharedAlbumSnapshot($userId, $shareToken);
 
 	if (!$result['success']) {
 		return $response->withStatus($result['status'])->withJson(array(

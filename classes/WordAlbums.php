@@ -364,7 +364,8 @@ class WordAlbums
             $words[] = [
                 'id' => (int)$word['id'],
                 'word' => $word['word'],
-                'definition' => $word['def']
+                'definition' => $word['def'],
+                'position' => isset($word['position']) ? (int)$word['position'] : null
             ];
         }
 
@@ -479,6 +480,218 @@ class WordAlbums
                 'error' => 'Could not load shared album: ' . $e->getMessage()
             ];
         }
+    }
+
+    public function keepSharedAlbumSnapshot($userId, $shareToken)
+    {
+        global $wordmageDb;
+
+        $customMoods = new CustomMoods();
+
+        $userId = (int)$userId;
+        $shareToken = trim((string)$shareToken);
+
+        if ($userId <= 0 || $shareToken === '') {
+            return [
+                'success' => false,
+                'status' => 400,
+                'error' => 'Invalid share token'
+            ];
+        }
+
+        try {
+            $snapshotStmt = $wordmageDb->prepare("
+                SELECT title, mood_text, words_json
+                FROM shared_album_snapshots
+                WHERE share_token = :share_token
+                  AND revoked_at IS NULL
+                LIMIT 1
+            ");
+            $snapshotStmt->execute([':share_token' => $shareToken]);
+
+            $snapshot = $snapshotStmt->fetch(\PDO::FETCH_ASSOC);
+            if (!$snapshot) {
+                return [
+                    'success' => false,
+                    'status' => 404,
+                    'error' => 'Shared album not found'
+                ];
+            }
+
+            $snapshotWords = json_decode((string)$snapshot['words_json'], true);
+            if (!is_array($snapshotWords)) {
+                $snapshotWords = [];
+            }
+
+            $albumWords = [];
+            $seen = [];
+            $fallbackPosition = 1;
+
+            foreach ($snapshotWords as $word) {
+                $wordId = isset($word['id']) ? (int)$word['id'] : 0;
+                if ($wordId <= 0) {
+                    continue;
+                }
+
+                if (isset($seen[$wordId])) {
+                    continue;
+                }
+
+                $position = isset($word['position']) && is_numeric($word['position'])
+                    ? (int)$word['position']
+                    : $fallbackPosition;
+
+                $albumWords[] = [
+                    'id' => $wordId,
+                    'is_locked' => 0,
+                    'position' => $position > 0 ? $position : null
+                ];
+                $seen[$wordId] = true;
+                $fallbackPosition++;
+            }
+
+            $wordIds = array_values(array_map(function ($word) {
+                return (int)$word['id'];
+            }, $albumWords));
+
+            $title = $this->buildCopyAlbumTitle($userId, $snapshot['title']);
+            $moodText = isset($snapshot['mood_text']) ? trim((string)$snapshot['mood_text']) : '';
+            $customMoodId = null;
+
+            $wordmageDb->beginTransaction();
+
+            if ($moodText !== '') {
+                $normalizedMoodText = preg_replace('/\s+/', ' ', $moodText);
+                $moodHash = hash('sha256', (string)$normalizedMoodText, true);
+
+                $moodStmt = $wordmageDb->prepare("
+                    INSERT INTO custom_moods (user_id, mood_text, mood_hash, last_used_at, use_count)
+                    VALUES (:user_id, :mood_text, :mood_hash, NOW(), 1)
+                    ON DUPLICATE KEY UPDATE
+                      id = LAST_INSERT_ID(id),
+                      mood_text = VALUES(mood_text),
+                      last_used_at = NOW(),
+                      use_count = use_count + 1
+                ");
+                $moodStmt->execute([
+                    ':user_id' => $userId,
+                    ':mood_text' => $normalizedMoodText,
+                    ':mood_hash' => $moodHash
+                ]);
+
+                $customMoodId = (int)$wordmageDb->lastInsertId();
+                if ($customMoodId <= 0) {
+                    $wordmageDb->rollBack();
+                    return [
+                        'success' => false,
+                        'status' => 500,
+                        'error' => 'Could not resolve custom mood id for shared album.'
+                    ];
+                }
+
+                $embedResult = $customMoods->updateCustomMoodWithEmbedding($customMoodId, $normalizedMoodText);
+                if (!(isset($embedResult['success']) && $embedResult['success'])) {
+                    $wordmageDb->rollBack();
+                    return $embedResult;
+                }
+
+                $moodText = $normalizedMoodText;
+            } else {
+                $moodText = null;
+            }
+
+            $albumStmt = $wordmageDb->prepare("
+                INSERT INTO word_albums (user_id, title, custom_mood_id, source_type)
+                VALUES (:user_id, :title, :custom_mood_id, :source_type)
+            ");
+            $albumStmt->execute([
+                ':user_id' => $userId,
+                ':title' => $title,
+                ':custom_mood_id' => $customMoodId,
+                ':source_type' => 'mood'
+            ]);
+
+            $albumId = (int)$wordmageDb->lastInsertId();
+            $this->replaceAlbumItems($albumId, $albumWords);
+
+            $wordmageDb->commit();
+
+            $coverPath = null;
+            try {
+                $coverPath = $this->generateAlbumCard($albumId, $title, $moodText, $wordIds);
+                $this->updateAlbumCoverPath($albumId, $coverPath);
+            } catch (\Exception $e) {
+                // Album is still valid if cover generation fails.
+            }
+
+            return [
+                'success' => true,
+                'status' => 200,
+                'data' => [
+                    'album_id' => $albumId,
+                    'title' => $title,
+                    'cover_image_path' => $coverPath
+                ]
+            ];
+        } catch (\Exception $e) {
+            if ($wordmageDb->inTransaction()) {
+                $wordmageDb->rollBack();
+            }
+
+            return [
+                'success' => false,
+                'status' => 500,
+                'error' => 'Could not keep shared album: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    private function buildCopyAlbumTitle($userId, $baseTitle)
+    {
+        global $wordmageDb;
+
+        $baseTitle = trim((string)$baseTitle);
+        if ($baseTitle === '') {
+            $baseTitle = 'Shared Album';
+        }
+
+        $stmt = $wordmageDb->prepare("
+            SELECT title
+            FROM word_albums
+            WHERE user_id = :user_id
+              AND (
+                title = :base_title
+                OR title LIKE :copy_title_pattern
+              )
+        ");
+        $stmt->execute([
+            ':user_id' => (int)$userId,
+            ':base_title' => $baseTitle,
+            ':copy_title_pattern' => $baseTitle . ' (Copy%'
+        ]);
+
+        $existing = [];
+        while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+            $existing[$row['title']] = true;
+        }
+
+        if (!isset($existing[$baseTitle])) {
+            return $baseTitle;
+        }
+
+        $copyTitle = $baseTitle . ' (Copy)';
+        if (!isset($existing[$copyTitle])) {
+            return $copyTitle;
+        }
+
+        for ($copyNumber = 2; $copyNumber < 1000; $copyNumber++) {
+            $copyTitle = $baseTitle . ' (Copy ' . $copyNumber . ')';
+            if (!isset($existing[$copyTitle])) {
+                return $copyTitle;
+            }
+        }
+
+        return $baseTitle . ' (Copy ' . time() . ')';
     }
 
     private function generateShareToken()
