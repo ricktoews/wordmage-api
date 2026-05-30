@@ -362,6 +362,7 @@ class WordAlbums
         $words = [];
         foreach ($album['words'] as $word) {
             $words[] = [
+                'id' => (int)$word['id'],
                 'word' => $word['word'],
                 'definition' => $word['def']
             ];
