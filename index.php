@@ -71,19 +71,11 @@ $app->add(function ($request, $response, $next) {
 	return $next($request, $newResponse);
 });
 
-$app->post('/login', 'login');
-$app->post('/register', 'register');
-$app->post('/anonymous-user', 'createAnonymousUser');
-$app->post('/anonymous-user/claim-albums', 'claimAnonymousUserAlbums');
-$app->post('/loadcustom', 'loadCustom');
-$app->post('/savecustom', 'saveCustom');
-$app->post('/savetraining', 'saveTraining');
-$app->get('/shared/albums/{share_token}', 'getSharedAlbumSnapshot');
-$app->post('/shared/albums/{share_token}/keep', 'keepSharedAlbumSnapshot');
-$app->post('/capture', 'extractWordsFromPage');
-$app->post('/locate', 'locate');
-$app->post('/test-image-analysis', 'testImageAnalysis');
-
+/*
+ * Disabled vestigial endpoints.
+ * These are not in the current app-used endpoint list. Restore a route from
+ * this section if the app reports an unexpected 404.
+ *
 $app->get('/', function() {
 	global $wordmageDb;
 	$sql = "SELECT id, word, definition, source FROM word_pool ORDER BY word";
@@ -195,12 +187,6 @@ $app->post('/import-words-from-input', function() {
 });
 
 
-$app->post('/words/sendlocal', 'wordsSendLocal');
-$app->get('/words/retrievelocal/{code}', 'wordsRetrieveLocal');
-$app->post('/words/add', 'addWord');
-$app->get('/get-words', 'getWords');
-$app->get('/get-words-page', 'getWordsPage');
-$app->post('/get-random-page-data', 'getRandomPageData');
 $app->get('/words/mood/{slug}', function ($request, $response, $args) {
     $words = new \WordMage\Words();
     $results = $words->getWordsByMood($args['slug'], 13);
@@ -210,6 +196,7 @@ $app->get('/moods', function ($request, $response) {
     $words = new \WordMage\Words();
     return $response->withJson($words->getMoods());
 });
+*/
 
 /*
 $app->get('/custom-mood/{mood_text}', function ($request, $response, $args) {
@@ -219,13 +206,13 @@ $app->get('/custom-mood/{mood_text}', function ($request, $response, $args) {
 });
 */
 
-/*
 $app->post('/custom-mood', function ($request, $response) {
     $data = $request->getParsedBody();
 
     $customMoodId = isset($data['custom_mood_id']) ? (int)$data['custom_mood_id'] : 0;
     $limit = isset($data['limit']) ? (int)$data['limit'] : 13;
     $exclude_word_ids = isset($data['exclude_word_ids']) && is_array($data['exclude_word_ids']) ? $data['exclude_word_ids'] : [];
+    $embedding = null;
 
     $customMoods = new \WordMage\CustomMoods();
 
@@ -252,7 +239,6 @@ $app->post('/custom-mood', function ($request, $response) {
 
     return $response->withJson($finalWords);
 });
-*/
 
 /*
 $app->put('/custom-moods/{id}', function ($request, $response, $args) {
@@ -652,8 +638,7 @@ $app->get('/albums/{album_id}/unscramble-queue', \WordMage\UserWordLearning::cla
 
 $app->post('/user-word-learning/unscramble-attempt', \WordMage\UserWordLearning::class . ':recordUnscrambleAttempt');
 
-$app->run();
-
+$app->get('/get-words', 'getWords');
 function getWords(Request $request, Response $response) {
 	$words = new Words();
 	$wordPool = $words->getWordPool();
@@ -668,6 +653,7 @@ function getWords(Request $request, Response $response) {
 		->write(json_encode($payload));
 }
 
+$app->post('/get-random-page-data', 'getRandomPageData');
 function getRandomPageData($request, $response, $args) {
     $body = $request->getBody();
     $data = json_decode($body, true);
@@ -718,6 +704,7 @@ function getRandomPageData($request, $response, $args) {
 }
 
 
+$app->get('/get-words-page', 'getWordsPage');
 function getWordsPage($request, $response, $args) {
     $startsWith = trim((string)$request->getQueryParam('starts_with', 'a'));
     $afterWord  = trim((string)$request->getQueryParam('after_word', ''));
@@ -756,6 +743,7 @@ function getWordsPage($request, $response, $args) {
 
 
 
+// Disabled vestigial endpoint: $app->post('/words/sendlocal', 'wordsSendLocal');
 function wordsSendLocal(Request $request, Response $response) {
 	$wordsShare = new WordsShareLocal();
 	$body = $request->getBody();
@@ -764,6 +752,7 @@ function wordsSendLocal(Request $request, Response $response) {
 	echo json_encode(array('code' => $code));
 }
 
+// Disabled vestigial endpoint: $app->get('/words/retrievelocal/{code}', 'wordsRetrieveLocal');
 function wordsRetrieveLocal(Request $request, Response $response, array $args) {
 	$code = $args['code'];
 	$wordsShare = new WordsShareLocal();
@@ -772,6 +761,7 @@ function wordsRetrieveLocal(Request $request, Response $response, array $args) {
 	echo json_encode($userData);
 }
 
+$app->post('/login', 'login');
 function login(Request $request, Response $response) {
 	$body = $request->getBody();
 	$data = json_decode($body, true);
@@ -783,6 +773,7 @@ function login(Request $request, Response $response) {
 	echo json_encode($payload);
 }
 
+$app->post('/register', 'register');
 function register(Request $request, Response $response) {
 	global $wordmageDb;
 
@@ -814,6 +805,7 @@ function register(Request $request, Response $response) {
 
 }
 
+$app->post('/anonymous-user', 'createAnonymousUser');
 function createAnonymousUser(Request $request, Response $response) {
 	$register = new Register();
 
@@ -828,6 +820,7 @@ function createAnonymousUser(Request $request, Response $response) {
 	}
 }
 
+$app->post('/anonymous-user/claim-albums', 'claimAnonymousUserAlbums');
 function claimAnonymousUserAlbums(Request $request, Response $response) {
 	$userId = getAuthenticatedUserId($request);
 	if (!$userId) {
@@ -866,6 +859,7 @@ function claimAnonymousUserAlbums(Request $request, Response $response) {
 	return $response->withJson($result['data']);
 }
 
+$app->get('/shared/albums/{share_token}', 'getSharedAlbumSnapshot');
 function getSharedAlbumSnapshot(Request $request, Response $response, array $args) {
 	$shareToken = isset($args['share_token']) ? trim((string)$args['share_token']) : '';
 
@@ -881,6 +875,7 @@ function getSharedAlbumSnapshot(Request $request, Response $response, array $arg
 	return $response->withJson($result['data']);
 }
 
+$app->post('/shared/albums/{share_token}/keep', 'keepSharedAlbumSnapshot');
 function keepSharedAlbumSnapshot(Request $request, Response $response, array $args) {
 	$userId = getAuthenticatedUserId($request);
 	if (!$userId) {
@@ -901,6 +896,7 @@ function keepSharedAlbumSnapshot(Request $request, Response $response, array $ar
 	return $response->withJson($result['data']);
 }
 
+$app->post('/loadcustom', 'loadCustom');
 function loadCustom(Request $request, Response $response) {
         $user_id = getAuthenticatedUserId($request);
         if (!$user_id) {
@@ -923,6 +919,7 @@ function loadCustom(Request $request, Response $response) {
         echo json_encode($payload);
 }
 
+$app->post('/savecustom', 'saveCustom');
 function saveCustom(Request $request, Response $response) {
 	$body = $request->getBody();
 	$data = json_decode($body, true);
@@ -939,6 +936,7 @@ function saveCustom(Request $request, Response $response) {
 	echo json_encode($payload);
 }
 
+$app->post('/savetraining', 'saveTraining');
 function saveTraining(Request $request, Response $response) {
 	$body = $request->getBody();
 	$data = json_decode($body, true);
@@ -954,6 +952,7 @@ function saveTraining(Request $request, Response $response) {
 	echo json_encode($payload);
 }
 
+// Disabled vestigial endpoint: $app->post('/words/add', 'addWord');
 function addWord(Request $request, Response $response) {
 	$body = $request->getBody();
 	$data = json_decode($body, true);
@@ -965,6 +964,7 @@ function addWord(Request $request, Response $response) {
 	echo json_encode($result);
 }
 
+// Disabled vestigial endpoint: $app->post('/capture', 'extractWordsFromPage');
 function extractWordsFromPage(Request $request, Response $response) {
 	$body = $request->getBody();
 	$data = json_decode($body, true);
@@ -979,6 +979,7 @@ function extractWordsFromPage(Request $request, Response $response) {
 //	echo $result;
 }
 
+// Disabled vestigial endpoint: $app->post('/test-image-analysis', 'testImageAnalysis');
 function testImageAnalysis(Request $request, Response $response) {
 	error_log('====> testImageAnalysis form submission TOP');
     // 1) Multipart fields
@@ -1040,6 +1041,7 @@ function testImageAnalysis(Request $request, Response $response) {
 }
 
 
+// Disabled vestigial endpoint: $app->post('/locate', 'locate');
 function locate(Request $request, Response $response) {
 	$contentType = $request->getHeaderLine('Content-Type') ?? '';
 	$body = $request->getBody();
@@ -1053,3 +1055,5 @@ error_log("====> locate result <===== " . json_encode($result));
 	return $response->withHeader('Content-Type', 'application/json');
 
 }
+
+$app->run();
