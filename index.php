@@ -78,6 +78,7 @@ $app->post('/anonymous-user/claim-albums', 'claimAnonymousUserAlbums');
 $app->post('/loadcustom', 'loadCustom');
 $app->post('/savecustom', 'saveCustom');
 $app->post('/savetraining', 'saveTraining');
+$app->get('/shared/albums/{share_token}', 'getSharedAlbumSnapshot');
 $app->post('/capture', 'extractWordsFromPage');
 $app->post('/locate', 'locate');
 $app->post('/test-image-analysis', 'testImageAnalysis');
@@ -434,6 +435,26 @@ $app->patch('/albums/{id}/mood-text', function ($request, $response, $args) {
 
     $albums = new \WordMage\WordAlbums();
     $result = $albums->updateAlbumMoodText($userId, $albumId, $moodText);
+
+    if (!$result['success']) {
+        return $response->withStatus($result['status'])->withJson([
+            'error' => $result['error']
+        ]);
+    }
+
+    return $response->withJson($result['data']);
+});
+
+$app->post('/albums/{id}/share-snapshot', function ($request, $response, $args) {
+    $userId = getAuthenticatedUserId($request);
+    if (!$userId) {
+        return unauthorizedResponse($response);
+    }
+
+    $albumId = isset($args['id']) ? (int)$args['id'] : 0;
+
+    $albums = new \WordMage\WordAlbums();
+    $result = $albums->createShareSnapshot($userId, $albumId);
 
     if (!$result['success']) {
         return $response->withStatus($result['status'])->withJson([
@@ -834,6 +855,21 @@ function claimAnonymousUserAlbums(Request $request, Response $response) {
 
 	$wordAlbums = new \WordMage\WordAlbums();
 	$result = $wordAlbums->claimAnonymousAlbums($userId, $anonymousUserId, $anonymousToken, $albumIds, $deleteRemainingAlbums);
+
+	if (!$result['success']) {
+		return $response->withStatus($result['status'])->withJson(array(
+			'error' => $result['error']
+		));
+	}
+
+	return $response->withJson($result['data']);
+}
+
+function getSharedAlbumSnapshot(Request $request, Response $response, array $args) {
+	$shareToken = isset($args['share_token']) ? trim((string)$args['share_token']) : '';
+
+	$wordAlbums = new \WordMage\WordAlbums();
+	$result = $wordAlbums->getSharedAlbumSnapshot($shareToken);
 
 	if (!$result['success']) {
 		return $response->withStatus($result['status'])->withJson(array(

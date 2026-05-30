@@ -338,6 +338,181 @@ class WordAlbums
         }
     }
 
+    public function createShareSnapshot($userId, $albumId)
+    {
+        global $wordmageDb;
+
+        $userId = (int)$userId;
+        $albumId = (int)$albumId;
+
+        if ($userId <= 0 || $albumId <= 0) {
+            return [
+                'success' => false,
+                'status' => 400,
+                'error' => 'Invalid album id'
+            ];
+        }
+
+        $albumResult = $this->getAlbumById($userId, $albumId);
+        if (!$albumResult['success']) {
+            return $albumResult;
+        }
+
+        $album = $albumResult['data'];
+        $words = [];
+        foreach ($album['words'] as $word) {
+            $words[] = [
+                'word' => $word['word'],
+                'definition' => $word['def']
+            ];
+        }
+
+        $shareToken = $this->generateShareToken();
+        $wordsJson = json_encode($words);
+        if ($wordsJson === false) {
+            return [
+                'success' => false,
+                'status' => 500,
+                'error' => 'Could not encode share snapshot words.'
+            ];
+        }
+
+        try {
+            $stmt = $wordmageDb->prepare("
+                INSERT INTO shared_album_snapshots (
+                    share_token,
+                    owner_user_id,
+                    source_album_id,
+                    title,
+                    mood_text,
+                    words_json,
+                    album_created_at
+                ) VALUES (
+                    :share_token,
+                    :owner_user_id,
+                    :source_album_id,
+                    :title,
+                    :mood_text,
+                    :words_json,
+                    :album_created_at
+                )
+            ");
+            $stmt->execute([
+                ':share_token' => $shareToken,
+                ':owner_user_id' => $userId,
+                ':source_album_id' => $albumId,
+                ':title' => $album['title'],
+                ':mood_text' => $album['mood_text'],
+                ':words_json' => $wordsJson,
+                ':album_created_at' => $album['created_at']
+            ]);
+
+            return [
+                'success' => true,
+                'status' => 200,
+                'data' => [
+                    'share_token' => $shareToken,
+                    'share_url' => $this->buildShareUrl($shareToken)
+                ]
+            ];
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'status' => 500,
+                'error' => 'Could not create share snapshot: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    public function getSharedAlbumSnapshot($shareToken)
+    {
+        global $wordmageDb;
+
+        $shareToken = trim((string)$shareToken);
+        if ($shareToken === '') {
+            return [
+                'success' => false,
+                'status' => 400,
+                'error' => 'Invalid share token'
+            ];
+        }
+
+        try {
+            $stmt = $wordmageDb->prepare("
+                SELECT title, mood_text, words_json, created_at
+                FROM shared_album_snapshots
+                WHERE share_token = :share_token
+                  AND revoked_at IS NULL
+                LIMIT 1
+            ");
+            $stmt->execute([':share_token' => $shareToken]);
+
+            $snapshot = $stmt->fetch(\PDO::FETCH_ASSOC);
+            if (!$snapshot) {
+                return [
+                    'success' => false,
+                    'status' => 404,
+                    'error' => 'Shared album not found'
+                ];
+            }
+
+            $words = json_decode((string)$snapshot['words_json'], true);
+            if (!is_array($words)) {
+                $words = [];
+            }
+
+            return [
+                'success' => true,
+                'status' => 200,
+                'data' => [
+                    'title' => $snapshot['title'],
+                    'mood_text' => $snapshot['mood_text'],
+                    'words' => $words,
+                    'created_at' => $snapshot['created_at']
+                ]
+            ];
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'status' => 500,
+                'error' => 'Could not load shared album: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    private function generateShareToken()
+    {
+        global $wordmageDb;
+
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $shareToken = bin2hex(random_bytes(32));
+
+            $stmt = $wordmageDb->prepare("
+                SELECT id
+                FROM shared_album_snapshots
+                WHERE share_token = :share_token
+                LIMIT 1
+            ");
+            $stmt->execute([':share_token' => $shareToken]);
+
+            if (!$stmt->fetch(\PDO::FETCH_ASSOC)) {
+                return $shareToken;
+            }
+        }
+
+        throw new \Exception('Could not generate a unique share token.');
+    }
+
+    private function buildShareUrl($shareToken)
+    {
+        $baseUrl = getenv('WORDMAGE_SHARE_BASE_URL');
+        if (!$baseUrl) {
+            $baseUrl = 'https://wordmage.app/shared/albums';
+        }
+
+        return rtrim($baseUrl, '/') . '/' . $shareToken;
+    }
+
 
     public function getPermanentAlbumsByUser($userid) {
         global $wordmageDb;
